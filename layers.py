@@ -515,10 +515,10 @@ class QANetOutput(nn.Module):
         for weight in (self.w1_weight, self.w2_weight):
             nn.init.xavier_uniform_(weight)
 
-    def forward(self, M1, M2, mask):
+    def forward(self, M12, M13, mask):
         # Shapes: (batch_size, seq_len, 1)
-        logits_1 = torch.matmul(M1.transpose(1, 2), self.w1_weight)
-        logits_2 = torch.matmul(M2.transpose(1, 2), self.w1_weight)
+        logits_1 = torch.matmul(M12.transpose(1, 2), self.w1_weight)
+        logits_2 = torch.matmul(M13.transpose(1, 2), self.w2_weight)
 
         # print(logits_1.shape)
         # print(logits_1.squeeze().shape)
