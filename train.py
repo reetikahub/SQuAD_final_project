@@ -66,7 +66,7 @@ def main(args):
         q_max_len=50,
         d_model=96,
         drop_prob=0.1,
-        num_head=8)
+        num_head=1)
     model = nn.DataParallel(model, args.gpu_ids)
     if args.load_path:
         log.info(f'Loading checkpoint from {args.load_path}...')
