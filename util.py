@@ -134,8 +134,8 @@ def collate_fn(examples):
         y1s, y2s, ids = zip(*examples)
 
     # Merge into batch tensors
-    context_idxs = merge_1d(context_idxs, 400)
-    context_char_idxs = merge_2d(context_char_idxs, 400)
+    context_idxs = merge_1d(context_idxs, 401)
+    context_char_idxs = merge_2d(context_char_idxs, 401)
     question_idxs = merge_1d(question_idxs, 50)
     question_char_idxs = merge_2d(question_char_idxs, 50)
     y1s = merge_0d(y1s)
@@ -661,8 +661,6 @@ def eval_dicts(gold_dict, pred_dict, no_answer):
     for key, value in pred_dict.items():
         total += 1
         ground_truths = gold_dict[key]['answers']
-        print("ground truth:{}".format(ground_truths))
-        print("predictions:{}".format(value))
         prediction = value
         em += metric_max_over_ground_truths(compute_em, prediction, ground_truths)
         f1 += metric_max_over_ground_truths(compute_f1, prediction, ground_truths)

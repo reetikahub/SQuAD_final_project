@@ -11,132 +11,147 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from util import masked_softmax
 import math
 
-d_model = 96
-n_head = 8
-d_word = 300
-d_char = 64
-batch_size = 8
-dropout = 0.1
-dropout_char = 0.05
-d_k = d_model // n_head
-
 
 def mask_logits(target, mask):
-    return target * ~(mask) + mask * (-1e30)
+    return target * (mask) + (1 - mask) * (-1e30)
+
+
+class Initialized_Conv1d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=1, bias=False):
+        super().__init__()
+        self.out = nn.Conv1d(in_channels, out_channels, kernel_size, bias=bias)
+        nn.init.xavier_uniform_(self.out.weight)
+
+    def forward(self, x):
+        return self.out(x)
+
+
+class Initialized_Conv1d_Relu(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=1, bias=False):
+        super().__init__()
+        self.out = nn.Conv1d(in_channels, out_channels, kernel_size, bias=bias)
+        nn.init.kaiming_normal_(self.out.weight, nonlinearity='relu')
+
+    def forward(self, x):
+        return F.relu(self.out(x))
+
+
+def PosEncoder(x):
+    channels = x.size()[1]  # (batch_size, channels, length)
+    length = x.size()[2]
+    freq = torch.Tensor([math.log(1e4) * (-i / ((channels // 2) - 1)) for i in range(channels // 2)])
+    freq = torch.exp(freq).unsqueeze(dim=1)  # (channels/2, 1)
+    # print(freqs)
+    # print(freqs.shape)
+    position = torch.arange(length).repeat(channels // 2, 1).to(torch.float)  # (channels/2, length)
+    # print(position.shape)
+    position = torch.mul(position, freq)  # (channels/2, length)
+    # print(position)
+    signal = torch.cat([torch.sin(position), torch.cos(position)], dim=0)  # (channels, length)
+    signal = signal.view(1, channels, length)
+    return x + signal.cuda()  # (batch_size, channels, length)
 
 
 class DepthwiseSeparableConv(nn.Module):
-    def __init__(self, in_ch, out_ch, k, dim=1, bias=True):
+    def __init__(self, in_ch, out_ch, k, bias=True):
         super().__init__()
-        if dim == 1:
-            self.depthwise_conv = nn.Conv1d(in_channels=in_ch, out_channels=in_ch, kernel_size=k, groups=in_ch,
-                                            padding=k // 2, bias=bias)
-            self.pointwise_conv = nn.Conv1d(in_channels=in_ch, out_channels=out_ch, kernel_size=1, padding=0, bias=bias)
-        elif dim == 2:
-            self.depthwise_conv = nn.Conv2d(in_channels=in_ch, out_channels=in_ch, kernel_size=k, groups=in_ch,
-                                            padding=k // 2, bias=bias)
-            self.pointwise_conv = nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=1, padding=0, bias=bias)
-        else:
-            raise Exception("Wrong dimension for Depthwise Separable Convolution!")
-        nn.init.kaiming_normal_(self.depthwise_conv.weight)
-        nn.init.constant_(self.depthwise_conv.bias, 0.0)
-        nn.init.kaiming_normal_(self.depthwise_conv.weight)
-        nn.init.constant_(self.pointwise_conv.bias, 0.0)
+        self.depthwise_conv = nn.Conv1d(in_channels=in_ch, out_channels=in_ch, kernel_size=k, groups=in_ch,
+                                        padding=k // 2, bias=False)
+        self.pointwise_conv = nn.Conv1d(in_channels=in_ch, out_channels=out_ch, kernel_size=1, padding=0, bias=bias)
 
     def forward(self, x):
-        return self.pointwise_conv(self.depthwise_conv(x))
+        return F.relu(self.pointwise_conv(self.depthwise_conv(x)))
 
-
-class PosEncoder(nn.Module):
-    def __init__(self, length):
+class SelfAttention(nn.Module):
+    def __init__(self, d_model, num_head, dropout):
         super().__init__()
-        freqs = torch.Tensor(
-            [10000 ** (-i / d_model) if i % 2 == 0 else -10000 ** ((1 - i) / d_model) for i in
-             range(d_model)]).unsqueeze(dim=1)
-        phases = torch.Tensor([0 if i % 2 == 0 else math.pi / 2 for i in range(d_model)]).unsqueeze(dim=1)
-        pos = torch.arange(length).repeat(d_model, 1).to(torch.float)
-        self.pos_encoding = nn.Parameter(torch.sin(torch.add(torch.mul(pos, freqs), phases)), requires_grad=False)
+        self.d_model = d_model
+        self.num_head = num_head
+        self.dropout = dropout
+        self.key = Initialized_Conv1d(in_channels=d_model, out_channels=d_model , kernel_size=1, bias=False)
+        self.query = Initialized_Conv1d(in_channels=d_model, out_channels=d_model, kernel_size=1, bias=False)
+        self.value = Initialized_Conv1d(in_channels=d_model, out_channels=d_model, kernel_size=1, bias=False)
+        self.bias = nn.Parameter(torch.zeros(1))
 
-    def forward(self, x):
-        # print("Input shape:{}".format(x.shape))
-        # print("position shape:{}".format(self.pos_encoding.shape))
-        x = x + self.pos_encoding
+    def forward(self, x, mask, bias=False): # (batch_size, channels, length)
+        B, C, T = x.size()
+        K = self.key(x).transpose(1,2) #(B, T, C)
+        # print(K.shape)
+        K = K.view(B, T, self.num_head, C // self.num_head).transpose(1, 2) # (B, nh, T, hs)
+        # print(K.shape)
+        Q = self.query(x).transpose(1,2)
+        Q = Q.view(B, T, self.num_head, C // self.num_head).transpose(1, 2) # (B, nh, T, hs)
+        V = self.value(x).transpose(1,2)
+        V = V.view(B, T, self.num_head, C // self.num_head).transpose(1, 2) # (B, nh, T, hs)
+        # print(Q.shape)
+        # print(K.shape)
+        # print(V.shape)
+        att = (Q @ K.transpose(-2, -1)) * (1.0 / math.sqrt(K.size(-1)))
+        if bias:
+            att += self.bias
+        if mask is not None:
+            shapes = [x if x != None else -1 for x in list(att.size())]
+            mask = mask.view(shapes[0], 1, 1, shapes[-1])
+            att = mask_logits(att, mask)
+        att = F.softmax(att, dim=-1)
+        att = F.dropout(att, p=self.dropout, training=self.training)
+        y = att @ V
+        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+        return y.transpose(1, 2)
+
+
+class Encoder(nn.Module):
+    def __init__(self, conv_num, d_model, num_head, k, drop_prob=0.1):
+        super().__init__()
+        self.convs = nn.ModuleList([DepthwiseSeparableConv(d_model, d_model, k) for _ in range(conv_num)])
+        self.layer_norms1 = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(conv_num)])
+        self.layer_norm2 = nn.LayerNorm(d_model)
+        self.attention = SelfAttention(d_model, num_head, drop_prob)
+        self.layer_norm3 = nn.LayerNorm(d_model)
+        # self.fc1 = nn.Linear(d_model, d_model)
+        self.fc_1 = Initialized_Conv1d_Relu(d_model, d_model, bias=True)
+        self.fc_2 = Initialized_Conv1d(d_model, d_model, bias=True)
+        self.drop_prob = drop_prob
+        self.conv_num = conv_num
+
+    def forward(self, x, mask, l, blks):
+        total_layers = (self.conv_num + 1) * blks
+        x = PosEncoder(x)
+        res = x
+        for i, conv in enumerate(self.convs):
+            x = self.layer_norms1[i](x.transpose(1, 2)).transpose(1,
+                                                                  2)  # (batch_size, seq_len, channels) We're taking layer norm along the channels dimension
+            if i % 2 == 0:
+                x = F.dropout(x, p=self.drop_prob, training=self.training)
+            x = conv(x)
+            x = self.layer_dropout(x, res, self.drop_prob * float(l) / total_layers)
+            l += 1
+            res = x
+        x = self.layer_norm2(x.transpose(1, 2)).transpose(1, 2)
+        x = F.dropout(x, p=self.drop_prob, training=self.training)
+        x = self.attention(x, mask)
+        x = self.layer_dropout(x, res, self.drop_prob * float(l) / total_layers)
+        l += 1
+        res = x
+        x = self.layer_norm3(x.transpose(1, 2)).transpose(1, 2)
+        x = F.dropout(x, p=self.drop_prob, training=self.training)
+        x = self.fc_1(x)
+        x = self.fc_2(x)
+        x = self.layer_dropout(x, res, self.drop_prob * float(l) / total_layers)
         return x
 
-
-class MultiHeadAttention(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        self.q_linear = nn.Linear(d_model, d_model)
-        self.v_linear = nn.Linear(d_model, d_model)
-        self.k_linear = nn.Linear(d_model, d_model)
-        self.dropout = nn.Dropout(dropout)
-        self.fc = nn.Linear(d_model, d_model)
-        self.a = 1 / math.sqrt(d_k)
-
-    def forward(self, x, mask):
-        bs, _, l_x = x.size()
-        x = x.transpose(1, 2)
-        k = self.k_linear(x).view(bs, l_x, n_head, d_k)
-        q = self.q_linear(x).view(bs, l_x, n_head, d_k)
-        v = self.v_linear(x).view(bs, l_x, n_head, d_k)
-        q = q.permute(2, 0, 1, 3).contiguous().view(bs * n_head, l_x, d_k)
-        k = k.permute(2, 0, 1, 3).contiguous().view(bs * n_head, l_x, d_k)
-        v = v.permute(2, 0, 1, 3).contiguous().view(bs * n_head, l_x, d_k)
-        mask = mask.unsqueeze(1).expand(-1, l_x, -1).repeat(n_head, 1, 1)
-
-        attn = torch.bmm(q, k.transpose(1, 2)) * self.a
-        attn = mask_logits(attn, mask)
-        attn = F.softmax(attn, dim=2)
-        attn = self.dropout(attn)
-
-        out = torch.bmm(attn, v)
-        out = out.view(n_head, bs, l_x, d_k).permute(1, 2, 0, 3).contiguous().view(bs, l_x, d_model)
-        out = self.fc(out)
-        out = self.dropout(out)
-        return out.transpose(1, 2)
-
-
-class EncoderBlock(nn.Module):
-    def __init__(self, conv_num: int, ch_num: int, k: int, length: int):
-        super().__init__()
-        self.convs = nn.ModuleList([DepthwiseSeparableConv(ch_num, ch_num, k) for _ in range(conv_num)])
-        self.self_att = MultiHeadAttention()
-        self.fc = nn.Linear(ch_num, ch_num, bias=True)
-        self.pos = PosEncoder(length)
-        # self.norm = nn.LayerNorm([d_model, length])
-        self.normb = nn.LayerNorm([d_model, length])
-        self.norms = nn.ModuleList([nn.LayerNorm([d_model, length]) for _ in range(conv_num)])
-        self.norme = nn.LayerNorm([d_model, length])
-        self.L = conv_num
-
-    def forward(self, x, mask):
-        out = self.pos(x)
-        # print("Positional encoder {}".format(out.shape))
-        res = out
-        out = self.normb(out)
-        for i, conv in enumerate(self.convs):
-            out = conv(out)
-            out = F.relu(out)
-            out = out + res
-            if (i + 1) % 2 == 0:
-                p_drop = dropout * (i + 1) / self.L
-                out = F.dropout(out, p=p_drop, training=self.training)
-            res = out
-            out = self.norms[i](out)
-        # print("Before attention: {}".format(out.size()))
-        out = self.self_att(out, mask)
-        # print("After attention: {}".format(out.size()))
-        out = out + res
-        out = F.dropout(out, p=dropout, training=self.training)
-        res = out
-        out = self.norme(out)
-        out = self.fc(out.transpose(1, 2)).transpose(1, 2)
-        out = F.relu(out)
-        out = out + res
-        out = F.dropout(out, p=dropout, training=self.training)
-        return out
+    def layer_dropout(self, inputs, residual, dropout):
+        if self.training == True:
+            pred = torch.empty(1).uniform_(0, 1) < dropout
+            if pred:
+                return residual
+                print(pred)
+                print(dropout)
+                print("___________________")
+            else:
+                return F.dropout(inputs, dropout, training=self.training) + residual
+        else:
+            return inputs + residual
 
 
 class CharWordEmbedding(nn.Module):
@@ -151,41 +166,33 @@ class CharWordEmbedding(nn.Module):
         drop_prob (float): Probability of zero-ing out activations
     """
 
-    def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob, drop_prob_char):
-        super(CharWordEmbedding, self).__init__()
+    def __init__(self, d_word, d_char, channels, drop_prob=0.1, drop_prob_char=0.05):
+        super().__init__()
         self.drop_prob = drop_prob
         self.drop_prob_char = drop_prob_char
-        self.embed = nn.Embedding.from_pretrained(word_vectors)
-        self.char_embed = nn.Embedding.from_pretrained(char_vectors)
-        self.conv2d = DepthwiseSeparableConv(d_char, d_char, 5, dim=2)
-        # self.proj = nn.Linear(word_vectors.size(1), hidden_size, bias=False)
-        self.hwy = HighwayEncoder(2, d_word + d_char)
+        self.conv2d = nn.Conv2d(d_char, channels, kernel_size=(1, 5), bias=True)  # (d_char, d_char), earlier I did k=5
+        self.conv1d = Initialized_Conv1d(d_word + channels, channels, bias=False)  # (d_char+d_word)
+        nn.init.kaiming_normal_(self.conv2d.weight, nonlinearity='relu')
+        # self.proj = nn.Linear(word_vectors.size(1)+d_char, hidden_size, bias=False)
+        self.hwy = HighwayEncoder(2, channels)
 
-    def forward(self, wd, ch):
-        wd_emb = self.embed(wd)  # (batch_size, seq_len, embed_size)
-        wd_emb = F.dropout(wd_emb, self.drop_prob, self.training)
-        wd_emb = wd_emb.transpose(1, 2)
-        ch_emb = self.char_embed(ch)
+    def forward(self, wd_emb, ch_emb):
         # print(ch_emb.shape)
-        ch_emb = ch_emb.permute(0, 3, 1, 2)
+        wd_emb = F.dropout(wd_emb, self.drop_prob, self.training)  # (batch_size, seq_len, embed_size)
+        ch_emb = ch_emb.permute(0, 3, 1, 2)  # (batch_size, embed_size, seq_len, words)
         ch_emb = F.dropout(ch_emb, self.drop_prob_char, self.training)
-        # print("After permuting")
-        # print(ch_emb.shape)
         ch_emb = self.conv2d(ch_emb)
         ch_emb = F.relu(ch_emb)
-        # print("After convolution")
-        # print(ch_emb.shape)
         ch_emb, _ = torch.max(ch_emb, dim=3)
-        ch_emb = ch_emb.squeeze()
-        # print("After removing 3rd dimension, max pooling")
-        # print(ch_emb.shape)
-        # print(wd_emb.shape)
-        emb = torch.cat([ch_emb, wd_emb], dim=1)
-        # print(emb.shape)
-        # emb = self.proj(emb)  # (batch_size, seq_len, hidden_size)
-        emb = self.hwy(emb.transpose(1, 2))  # (batch_size, seq_len, hidden_size)
-
-        return emb.transpose(1, 2)
+        ch_emb = ch_emb.transpose(1, 2)  # (batch_size, seq_len, embed_size)
+        emb = torch.cat([ch_emb, wd_emb], dim=2)  # (batch_size, seq_len, embed_size_word+channels)
+        # emb = self.proj(emb)  # (batch_size, seq_len, embed_size_word+embed_size_char)
+        # Modification
+        emb_c = self.conv1d(emb.transpose(1,
+                                          2))  # (batch_size, channels, len) because next is conv for which #ch should be 2nd argument
+        # print(emb_c.shape)
+        emb_c = self.hwy(emb_c.transpose(1, 2))  # (batch_size, len, channels)
+        return emb_c.transpose(1, 2)  # (batch_size, channels, len)
 
 
 class Embedding(nn.Module):
@@ -210,10 +217,10 @@ class Embedding(nn.Module):
     def forward(self, x):
         emb = self.embed(x)  # (batch_size, seq_len, embed_size)
         emb = F.dropout(emb, self.drop_prob, self.training)
+        # print(emb.shape)
         emb = self.proj(emb)  # (batch_size, seq_len, hidden_size)
         emb = self.hwy(emb)  # (batch_size, seq_len, hidden_size)
-
-        return emb
+        return emb  # (batch_size, seq_len, hidden_size)
 
 
 class HighwayEncoder(nn.Module):
@@ -237,14 +244,11 @@ class HighwayEncoder(nn.Module):
                                     for _ in range(num_layers)])
 
     def forward(self, x):
-        # Added by Reetika
-        # x = x.transpose(1, 2)
         for gate, transform in zip(self.gates, self.transforms):
             # Shapes of g, t, and x are all (batch_size, seq_len, hidden_size)
             g = torch.sigmoid(gate(x))
             t = F.relu(transform(x))
             x = g * t + (1 - g) * x
-        # x = x.transpose(1, 2)
         return x
 
 
@@ -481,15 +485,15 @@ class BiDAFOutput(nn.Module):
         mod_2 = self.rnn(mod, mask.sum(-1))
         logits_2 = self.att_linear_2(att) + self.mod_linear_2(mod_2)
         # print(logits_1.shape)
-        # print(logits_1.squeeze().shape)
-        # print((logits_1.squeeze())[1, 1:10])
+        # # print(logits_1.squeeze().shape)
+        # print((logits_1.squeeze())[1, 45:60])
         # print((logits_1.squeeze())[1, -10:-1])
 
         # Shapes: (batch_size, seq_len)
         log_p1 = masked_softmax(logits_1.squeeze(), mask, log_softmax=True)
         log_p2 = masked_softmax(logits_2.squeeze(), mask, log_softmax=True)
         # print("log of prob")
-        # print(log_p1[1, 1:10])
+        # print(log_p1[1, 45:60])
         # print(log_p2[1, -10:-1])
         return log_p1, log_p2
 
@@ -509,25 +513,21 @@ class QANetOutput(nn.Module):
     """
 
     def __init__(self, d_model):
-        super(QANetOutput, self).__init__()
-        self.w1_weight = nn.Parameter(torch.zeros(2*d_model, 1))
-        self.w2_weight = nn.Parameter(torch.zeros(2*d_model, 1))
-        for weight in (self.w1_weight, self.w2_weight):
-            nn.init.xavier_uniform_(weight)
+        super().__init__()
+        self.w1 = Initialized_Conv1d(d_model * 2, 1)
+        self.w2 = Initialized_Conv1d(d_model * 2, 1)
 
-    def forward(self, M12, M13, mask):
-        # Shapes: (batch_size, seq_len, 1)
-        logits_1 = torch.matmul(M12.transpose(1, 2), self.w1_weight)
-        logits_2 = torch.matmul(M13.transpose(1, 2), self.w2_weight)
-
-        # print(logits_1.shape)
-        # print(logits_1.squeeze().shape)
-        # print((logits_1.squeeze())[1, 1:10])
-        # print((logits_1.squeeze())[1, -10:-1])
-        # Shapes: (batch_size, seq_len)
-        log_p1 = masked_softmax(logits_1.squeeze(), mask, log_softmax=True)
-        log_p2 = masked_softmax(logits_2.squeeze(), mask, log_softmax=True)
-        # print("log of prob")
-        # print(log_p1[1, 1:10])
+    def forward(self, M1, M2, M3, mask):
+        X1 = torch.cat([M1, M2], dim=1)
+        X2 = torch.cat([M1, M3], dim=1)
+        y1 = self.w1(X1)
+        y2 = self.w2(X2)
+        # print(logits_1.squeeze()[1, 45:60])
+        # print(logits_1.squeeze()[1, -10:-1])
+        log_p1 = masked_softmax(y1.squeeze(), mask, log_softmax=True)
+        log_p2 = masked_softmax(y2.squeeze(), mask, log_softmax=True)
+        # print(log_p1[1, 45:60])
         # print(log_p2[1, -10:-1])
         return log_p1, log_p2
+
+

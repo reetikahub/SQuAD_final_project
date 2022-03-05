@@ -48,17 +48,25 @@ def main(args):
     # Get model
     log.info('Building model...')
     # Added by Reetika - char_vectors here and hard-coded drop_prob_char - can be added to arguments later,
-    # Also added len_c and len_q arguments
+    # # Also added len_c and len_q arguments
     # model = BiDAF(word_vectors=word_vectors,
     #              char_vectors=char_vectors,
     #              hidden_size=args.hidden_size,
     #              drop_prob=args.drop_prob,
     #              drop_prob_char=0.05)
-    model = QANet(word_vectors=word_vectors,
-                  char_vectors=char_vectors,
-                  hidden_size=args.hidden_size,
-                  drop_prob=args.drop_prob,
-                  drop_prob_char=0.05)
+    # model = QANet(word_vectors=word_vectors,
+    #               char_vectors=char_vectors,
+    #               hidden_size=args.hidden_size,
+    #               drop_prob=args.drop_prob,
+    #               drop_prob_char=0.05)
+    model = QANet(
+        word_vec=word_vectors,
+        char_vec=char_vectors,
+        c_max_len=401,
+        q_max_len=50,
+        d_model=96,
+        drop_prob=0.1,
+        num_head=8)
     model = nn.DataParallel(model, args.gpu_ids)
     if args.load_path:
         log.info(f'Loading checkpoint from {args.load_path}...')
@@ -120,15 +128,20 @@ def main(args):
                 # Forward
                 # Added by Reetika - character level context and question in model
                 log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs)
+                # print("max of log p1:{}{}{}".format(log_p1[0,57], log_p1[1,45], log_p1[2,113]))
+                # print("max of log p2:{}{}{}".format(log_p2[0,60], log_p2[1,47], log_p2[2,113]))
                 y1, y2 = y1.to(device), y2.to(device)
-                print("y1 loss:{}".format(F.nll_loss(log_p1, y1)))
-                print("y2 loss:{}".format(F.nll_loss(log_p2, y2)))
+                # print("max of y1:{}".format(y1))
+                # print("max of y2:{}".format(y2))
+                # print("y1 loss:{}".format(F.nll_loss(log_p1, y1)))
+                # print("y2 loss:{}".format(F.nll_loss(log_p2, y2)))
 
                 loss = F.nll_loss(log_p1, y1) + F.nll_loss(log_p2, y2)
                 loss_val = loss.item()
 
                 # Backward
                 loss.backward()
+                # print(model.parameters())
                 nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 scheduler.step(step // batch_size)
@@ -204,7 +217,7 @@ def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2):
             # Get F1 and EM scores
             p1, p2 = log_p1.exp(), log_p2.exp()
             starts, ends = util.discretize(p1, p2, max_len, use_squad_v2)
-            print(starts,ends)
+            # print(starts, ends)
             # Log info
             progress_bar.update(batch_size)
             progress_bar.set_postfix(NLL=nll_meter.avg)
