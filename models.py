@@ -8,10 +8,7 @@ import layers
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from layers import CharWordEmbedding, Encoder, QANetOutput, Initialized_Conv1d, QANetAttention
-d_model = 96
-d_word = 300
-d_char = 64
+from layers import CharWordEmbedding, Encoder, QANetOutput, Initialized_Conv1d, QANetAttention, CoAttention
 
 
 # Added char level modeling inside BiDAF
@@ -102,7 +99,7 @@ class QANet(nn.Module):
         self.num_head = num_head
         self.emb_enc = Encoder(conv_num=4, d_model=d_model, num_head=num_head, k=7, drop_prob=drop_prob)
         self.cq_att = QANetAttention(d_model=d_model, drop_prob=drop_prob)
-        self.cq_resizer = Initialized_Conv1d(d_model * 4, d_model)
+        self.cq_proj = Initialized_Conv1d(d_model * 4, d_model)
         self.model_enc_blks = nn.ModuleList([Encoder(conv_num=2, d_model=d_model, num_head=num_head, k=5, drop_prob=drop_prob) for _ in range(7)])
         self.out = QANetOutput(d_model)
         self.Lc = c_max_len
@@ -120,7 +117,7 @@ class QANet(nn.Module):
         Ce = self.emb_enc(C, maskC, 1, 1) # (batch_size, seq_len, hidden_size)
         Qe = self.emb_enc(Q, maskQ, 1, 1) # (batch_size, seq_len, hidden_size)
         X = self.cq_att(Ce, Qe, maskC, maskQ)
-        M0 = self.cq_resizer(X)
+        M0 = self.cq_proj(X)
         M0 = F.dropout(M0, p=self.dropout, training=self.training)
         for i, blk in enumerate(self.model_enc_blks):
              M0 = blk(M0, maskC, i*(2+2)+1, 7)

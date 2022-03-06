@@ -49,7 +49,7 @@ def PosEncoder(x):
     # print(position)
     signal = torch.cat([torch.sin(position), torch.cos(position)], dim=0)  # (channels, length)
     signal = signal.view(1, channels, length)
-    return x + signal.cuda()  # (batch_size, channels, length)
+    return x + signal  # (batch_size, channels, length)
 
 
 class DepthwiseSeparableConv(nn.Module):
@@ -377,6 +377,58 @@ class QANetAttention(nn.Module):
         return s
 
 
+class CoAttention(nn.Module):
+    def __init__(self, d_model, drop_prob):
+        super().__init__()
+        self.proj = nn.Linear(d_model, d_model)  # bias=True
+        self.c_weight = nn.Parameter(torch.zeros(d_model, 1))
+        self.q_weight = nn.Parameter(torch.zeros(d_model, 1))
+        self.cq_weight = nn.Parameter(torch.zeros(1, 1, d_model))
+        self.bias = nn.Parameter(torch.zeros(1))
+        for weight in (self.c_weight, self.q_weight, self.cq_weight):
+            nn.init.xavier_uniform_(weight)
+        self.sentinelc = nn.Parameter(torch.randn(1, 1, d_model))
+        self.sentinelq = nn.Parameter(torch.randn(1, 1, d_model))
+        self.drop_prob = drop_prob
+
+    def forward(self, c, q, c_mask, q_mask):
+        c = c.transpose(1, 2)
+        q = q.transpose(1, 2)
+        batch_size, c_len, _ = c.size()
+        q_len = q.size(1)
+        print(q.shape)
+        q = self.proj(q)  # q should be (b, len, dim)
+        q = F.tanh(q)
+        # print(self.sentinelq.shape)
+        # sentinelq = self.sentinelq.repeat(batch_size, 1, 1)
+        # print(sentinelq.shape)
+        # sentinelc = self.sentinelc.repeat(batch_size, 1, 1)
+        # print(q.shape)
+        # q = torch.cat((q, sentinelq), dim=1)  # concatenate in the length dimension
+        # print(q.shape)
+        # c = torch.cat((c, sentinelc), dim=1)
+        # c = F.dropout(c, self.drop_prob, self.training)  # (bs, c_len, hid_size)
+        # q = F.dropout(q, self.drop_prob, self.training)  # (bs, q_len, hid_size)
+        # s0 = torch.matmul(c, self.c_weight).expand([-1, -1, q_len])
+        # s1 = torch.matmul(q, self.q_weight).transpose(1, 2) \
+        #     .expand([-1, c_len, -1])
+        # s2 = torch.matmul(c * self.cq_weight, q.transpose(1, 2))
+        # s = s0 + s1 + s2 + self.bias
+        s = torch.matmul(c, q.transpose(1, 2))  # (N, c_len, q_len)
+        c_mask = c_mask.view(batch_size, c_len, 1)  # (batch_size, c_len, 1)
+        q_mask = q_mask.view(batch_size, 1, q_len)  # (batch_size, 1, q_len)
+        AQ = masked_softmax(s, q_mask, dim=2)  # (N, c_len, q_len_norm)
+        AD = masked_softmax(s, c_mask, dim=1)  # (N, c_len_norm, q_len)
+
+        CQ = torch.bmm(AQ.transpose(1, 2), c)  # (N, c_len, q_len)*(N, c_len, d) = (N, q_len, d)
+        CD = torch.cat((q, CQ), dim=2)  # (N, q_len, 2d)
+        CD = torch.bmm(AD, CD)  # (N, c_len, q_len)*(N, q_len, 2d) = (N, c_len, 2d)
+
+        x = torch.cat((c, CD), dim=2)  # (N, c_len, 3d)
+
+        return x.transpose(1, 2) #Channels should be 2nd argument due to convolution
+
+
 class BiDAFAttention(nn.Module):
     """Bidirectional attention originally used by BiDAF.
 
@@ -512,19 +564,31 @@ class QANetOutput(nn.Module):
         drop_prob (float): Probability of zero-ing out activations.
     """
 
-    def __init__(self, d_model):
+    def __init__(self, d_model, c_len=401):
         super().__init__()
         self.w1 = Initialized_Conv1d(d_model * 2, 1)
-        self.w2 = Initialized_Conv1d(d_model * 2, 1)
+        self.w2 = Initialized_Conv1d(d_model * 4, 1)
+        self.w3 = nn.Linear(2*c_len, c_len)
+
 
     def forward(self, M1, M2, M3, mask):
         X1 = torch.cat([M1, M2], dim=1)
         X2 = torch.cat([M1, M3], dim=1)
         y1 = self.w1(X1)
-        y2 = self.w2(X2)
         # print(logits_1.squeeze()[1, 45:60])
         # print(logits_1.squeeze()[1, -10:-1])
         log_p1 = masked_softmax(y1.squeeze(), mask, log_softmax=True)
+        p1 = masked_softmax(y1.squeeze(), mask, log_softmax=False)
+        Ximp = p1.unsqueeze(dim=1) * X1 #(N, 2d, len)
+        print(Ximp.shape)
+        yall = torch.cat((Ximp, X2), dim=1)
+        print("yall_shape:{}".format(yall.shape))
+        #y2 = self.w2(X2)
+        y2 = self.w2(yall)
+        st_end = F.relu(torch.cat((y1.squeeze(), y2.squeeze()), dim=1))
+        print(st_end.shape)
+        y3 = self.w3(st_end)
+        print(y3.shape)
         log_p2 = masked_softmax(y2.squeeze(), mask, log_softmax=True)
         # print(log_p1[1, 45:60])
         # print(log_p2[1, -10:-1])

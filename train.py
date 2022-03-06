@@ -13,6 +13,7 @@ import torch.optim as optim
 import torch.optim.lr_scheduler as sched
 import torch.utils.data as data
 import util
+import math
 
 from args import get_train_args
 from collections import OrderedDict
@@ -65,7 +66,7 @@ def main(args):
         c_max_len=401,
         q_max_len=50,
         d_model=96,
-        drop_prob=0.1,
+        drop_prob=args.drop_prob,
         num_head=1)
     model = nn.DataParallel(model, args.gpu_ids)
     if args.load_path:
@@ -84,10 +85,14 @@ def main(args):
                                  maximize_metric=args.maximize_metric,
                                  log=log)
 
-    # Get optimizer and scheduler
-    optimizer = optim.Adadelta(model.parameters(), args.lr,
-                               weight_decay=args.l2_wd)
-    scheduler = sched.LambdaLR(optimizer, lambda s: 1.)  # Constant LR
+    # Get optimizer and scheduler #0.9 or 0.8 #3e-7 or 5e-8
+    optimizer = optim.Adam(lr=args.lr, betas=(0.9, 0.999), eps=1e-7, weight_decay=args.l2_wd, params=model.parameters())
+    lr = args.lr
+    m = 1 / math.log2(1e3)
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ee: m * math.log2(ee + 1) if ee < 1e3 else 1)
+    # optimizer = optim.Adadelta(model.parameters(), args.lr,
+    #                            weight_decay=args.l2_wd)
+    # scheduler = sched.LambdaLR(optimizer, lambda s: 1.)  # Constant LR
 
     # Get data loader
     log.info('Building dataset...')
