@@ -42,7 +42,7 @@ def get_setup_args():
                         default='./data/answer.json')
     parser.add_argument('--para_limit',
                         type=int,
-                        default=401,
+                        default=400,
                         help='Max number of words in a paragraph')
     parser.add_argument('--ques_limit',
                         type=int,
@@ -58,7 +58,7 @@ def get_setup_args():
                         help='Max number of words in a question at test time')
     parser.add_argument('--char_dim',
                         type=int,
-                        default=64,
+                        default=200,
                         help='Size of char vectors (char-level embeddings)')
     parser.add_argument('--glove_dim',
                         type=int,
@@ -113,6 +113,14 @@ def get_train_args():
                         type=float,
                         default=0.1,
                         help='Probability of zeroing an activation in dropout layers.')
+    parser.add_argument('--d_model',
+                        type=float,
+                        default=128,
+                        help='The dimension of hidden layers of QANet.')
+    parser.add_argument('--num_head',
+                        type=float,
+                        default=8,
+                        help='Num of heads for QANet')
     parser.add_argument('--metric_name',
                         type=str,
                         default='F1',
@@ -190,7 +198,7 @@ def add_common_args(parser):
                         default='./data/word_emb.json')
     parser.add_argument('--char_emb_file',
                         type=str,
-                        default='./data/char_emb.json')
+                        default='./data/char_emb2.json')
     parser.add_argument('--train_eval_file',
                         type=str,
                         default='./data/train_eval.json')
@@ -223,7 +231,7 @@ def add_train_test_args(parser):
                         help='Base directory for saving information.')
     parser.add_argument('--batch_size',
                         type=int,
-                        default=16,
+                        default=42,
                         help='Batch size per GPU. Scales automatically when \
                               multiple GPUs are available.')
     parser.add_argument('--use_squad_v2',

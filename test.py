@@ -21,7 +21,7 @@ import util
 from args import get_test_args
 from collections import OrderedDict
 from json import dumps
-from models import BiDAF
+from models import BiDAF, QANet
 from os.path import join
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
@@ -43,11 +43,16 @@ def main(args):
     char_vectors = util.torch_from_json(args.char_emb_file)
     # Get model
     log.info('Building model...')
-    model = BiDAF(word_vectors=word_vectors,
-                  char_vectors=char_vectors,
-                  hidden_size=args.hidden_size,
-                  drop_prob=0,
-                  drop_prob_char=0)
+    #model = BiDAF(word_vectors=word_vectors,
+    #              char_vectors=char_vectors,
+    #              hidden_size=args.hidden_size,
+    #              drop_prob=0,
+    #              drop_prob_char=0)
+    model = QANet(word_vec=word_vectors,
+		char_vec=char_vectors,
+		d_model=args.d_model,
+		drop_prob=0,
+		num_head=args.num_head)
     model = nn.DataParallel(model, gpu_ids)
     log.info(f'Loading checkpoint from {args.load_path}...')
     model = util.load_model(model, args.load_path, gpu_ids, return_step=False)
@@ -138,6 +143,14 @@ def main(args):
         for uuid in sorted(sub_dict):
             csv_writer.writerow([uuid, sub_dict[uuid]])
 
+    #Added by Reetika for further analysis
+    sub_path = join(args.save_dir, args.split + '_' + args.sub_file + '2')
+    log.info(f'Writing submission file to {sub_path}2...')
+    with open(sub_path, 'w', newline='', encoding='utf-8') as csv_fh:
+        csv_writer = csv.writer(csv_fh, delimiter=',')
+        csv_writer.writerow(['Id', 'Predicted'])
+        for id in sorted(pred_dict):
+            csv_writer.writerow([id, pred_dict[id]])
 
 if __name__ == '__main__':
     main(get_test_args())

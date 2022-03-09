@@ -63,11 +63,9 @@ def main(args):
     model = QANet(
         word_vec=word_vectors,
         char_vec=char_vectors,
-        c_max_len=401,
-        q_max_len=50,
-        d_model=96,
+        d_model=args.d_model,
         drop_prob=args.drop_prob,
-        num_head=1)
+        num_head=args.num_head)
     model = nn.DataParallel(model, args.gpu_ids)
     if args.load_path:
         log.info(f'Loading checkpoint from {args.load_path}...')
@@ -85,14 +83,16 @@ def main(args):
                                  maximize_metric=args.maximize_metric,
                                  log=log)
 
-    # Get optimizer and scheduler #0.9 or 0.8 #3e-7 or 5e-8
+    # Get optimizer and scheduler
+    parameters = filter(lambda param: param.requires_grad, model.parameters())
     optimizer = optim.Adam(lr=args.lr, betas=(0.9, 0.999), eps=1e-7, weight_decay=args.l2_wd, params=model.parameters())
     lr = args.lr
     m = 1 / math.log2(1e3)
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ee: m * math.log2(ee + 1) if ee < 1e3 else 1)
-    # optimizer = optim.Adadelta(model.parameters(), args.lr,
-    #                            weight_decay=args.l2_wd)
-    # scheduler = sched.LambdaLR(optimizer, lambda s: 1.)  # Constant LR
+                    
+    #optimizer = optim.Adadelta(model.parameters(), args.lr,
+    #                           weight_decay=args.l2_wd)
+    #scheduler = sched.LambdaLR(optimizer, lambda s: 1.)  # Constant LR
 
     # Get data loader
     log.info('Building dataset...')
@@ -149,7 +149,8 @@ def main(args):
                 # print(model.parameters())
                 nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
-                scheduler.step(step // batch_size)
+                #scheduler.step(step // batch_size)
+                scheduler.step()
                 ema(model, step // batch_size)
 
                 # Log info
