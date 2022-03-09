@@ -113,14 +113,6 @@ def get_train_args():
                         type=float,
                         default=0.1,
                         help='Probability of zeroing an activation in dropout layers.')
-    parser.add_argument('--d_model',
-                        type=float,
-                        default=128,
-                        help='The dimension of hidden layers of QANet.')
-    parser.add_argument('--num_head',
-                        type=float,
-                        default=8,
-                        help='Num of heads for QANet')
     parser.add_argument('--metric_name',
                         type=str,
                         default='F1',
@@ -250,3 +242,11 @@ def add_train_test_args(parser):
                         type=str,
                         default=None,
                         help='Path to load as a model checkpoint.')
+    parser.add_argument('--d_model',
+                        type=float,
+                        default=128,
+                        help='The dimension of hidden layers of QANet.')
+    parser.add_argument('--num_head',
+                        type=float,
+                        default=8,
+                        help='Num of heads for QANet')
