@@ -1,2 +1,6 @@
 /data
 /save
+*.xml
+*.ipynb
+__pycache__
+x.py
