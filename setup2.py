@@ -96,22 +96,29 @@ def add_features(context, question):
     Q = nlp(question)
     question_lower = {w.text.lower() for w in Q}
     qa['em'] = [1 if w.text.lower() in question_lower else 0 for w in C]
-    # print("em:{}".format(qa['em']))
+    ques_lemma = {w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower() for w in Q}
+    qa['em_lem'] = [(w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower()) in ques_lemma for w in C]
     qa['pos'] = [token.tag_ for token in C]
     qa['pos'] = _get_idx(qa['pos'], [''] + list(nlp.tagger.labels))
     qa['ner'] = [token.ent_type_ for token in C]
     qa['ner'] = _get_idx(qa['ner'], [''] + list(entity_types))
     counts = Counter(map(lambda token: token.text.lower(), C))
     freqs = {index: counts[token.text.lower()] for index, token in enumerate(C)}
-    # print("freqs:{}".format(len(freqs)))
     freqs_norm = sum(freqs.values())
-    # print("freqs_norm:{}".format(freqs_norm))
     qa['ntf'] = [freqs[index] / freqs_norm for index in range(len(freqs))]
-    # print("pos:{}".format(len(qa['pos'])))
-    # print("ntf:{}".format(len(qa['ntf'])))
-    # print("_____")
-    # print("ntf:{}".format(qa['ntf']))
-    #return list(zip(qa['em'], qa['pos'], qa['ner'], qa['ntf']))
+
+    context_lower = {w.text.lower() for w in C}
+    qa['em_q'] = [1 if w.text.lower() in context_lower else 0 for w in Q]
+    context_lemma = {w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower() for w in C}
+    qa['em_lem_q'] = [(w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower()) in context_lemma for w in Q]
+    qa['pos_q'] = [token.tag_ for token in Q]
+    qa['pos_q'] = _get_idx(qa['pos_q'], [''] + list(nlp.tagger.labels))
+    qa['ner_q'] = [token.ent_type_ for token in Q]
+    qa['ner_q'] = _get_idx(qa['ner_q'], [''] + list(entity_types))
+    counts = Counter(map(lambda token: token.text.lower(), Q))
+    freqs = {index: counts[token.text.lower()] for index, token in enumerate(Q)}
+    freqs_norm = sum(freqs.values())
+    qa['ntf_q'] = [freqs[index] / freqs_norm for index in range(len(freqs))]
     return qa
 
 def _get_idx(doc, vocab, unk_id=None):
@@ -301,11 +308,18 @@ def build_features(args, examples, data_type, out_file, word2idx_dict, char2idx_
     context_idxs = []
     context_char_idxs = []
     context_em_tags = []
+    context_em_lem_tags = []
     context_pos_tags = []
     context_ner_tags = []
     context_freq_tags = []
+
     ques_idxs = []
     ques_char_idxs = []
+    ques_em_tags = []
+    ques_em_lem_tags = []
+    ques_pos_tags = []
+    ques_ner_tags = []
+    ques_freq_tags = []
     y1s = []
     y2s = []
     ids = []
@@ -331,11 +345,17 @@ def build_features(args, examples, data_type, out_file, word2idx_dict, char2idx_
         context_idx = np.zeros([para_limit], dtype=np.int32)
         context_char_idx = np.zeros([para_limit, char_limit], dtype=np.int32)
         context_em_tag = np.full(para_limit, -1, dtype=np.int32)
-        context_pos_tag = np.zeros([para_limit], dtype=np.int32)
+        context_em_lem_tag = np.full(para_limit, -1, dtype=np.int32)
+        context_pos_tag = np.full([para_limit], -1, dtype=np.int32)
         context_ner_tag = np.full([para_limit], -1, dtype=np.int32)
         context_freq_tag = np.zeros([para_limit], dtype=np.float32)
         ques_idx = np.zeros([ques_limit], dtype=np.int32)
         ques_char_idx = np.zeros([ques_limit, char_limit], dtype=np.int32)
+        ques_em_tag = np.full(ques_limit, -1, dtype=np.int32)
+        ques_em_lem_tag = np.full(ques_limit, -1, dtype=np.int32)
+        ques_pos_tag = np.full([ques_limit], -1, dtype=np.int32)
+        ques_ner_tag = np.full([ques_limit], -1, dtype=np.int32)
+        ques_freq_tag = np.zeros([ques_limit], dtype=np.float32)
 
         # POS tags
         for i, token in enumerate(example["context_feature"]["pos"]):
@@ -351,11 +371,37 @@ def build_features(args, examples, data_type, out_file, word2idx_dict, char2idx_
         for i, token in enumerate(example["context_feature"]["em"]):
             context_em_tag[i] = token
         context_em_tags.append(context_em_tag)
+        for i, token in enumerate(example["context_feature"]["em_lem"]):
+            context_em_lem_tag[i] = token
+        context_em_tags.append(context_em_lem_tag)
 
         #NTF tags
         for i, token in enumerate(example["context_feature"]["ntf"]):
             context_freq_tag[i] = token
         context_freq_tags.append(context_freq_tag)
+
+        # POS tags
+        for i, token in enumerate(example["context_feature"]["pos_q"]):
+            ques_pos_tag[i] = token
+        ques_pos_tags.append(ques_pos_tag)
+
+        # NER tags
+        for i, token in enumerate(example["context_feature"]["ner_q"]):
+            ques_ner_tag[i] = token
+        ques_ner_tags.append(ques_ner_tag)
+
+        #EM tags
+        for i, token in enumerate(example["context_feature"]["em_q"]):
+            ques_em_tag[i] = token
+        ques_em_tags.append(ques_em_tag)
+        for i, token in enumerate(example["context_feature"]["em_lem_q"]):
+            ques_em_lem_tag[i] = token
+        ques_em_tags.append(ques_em_lem_tag)
+
+        #NTF tags
+        for i, token in enumerate(example["context_feature"]["ntf_q"]):
+            ques_freq_tag[i] = token
+        ques_freq_tags.append(ques_freq_tag)
 
         for i, token in enumerate(example["context_tokens"]):
             context_idx[i] = _get_word(token)
@@ -395,8 +441,15 @@ def build_features(args, examples, data_type, out_file, word2idx_dict, char2idx_
              context_ner_tags=np.array(context_ner_tags),
              context_freq_tags=np.array(context_freq_tags),
              context_em_tags=np.array(context_em_tags),
+             context_em_lem_tags=np.array(context_em_lem_tags),
+
              ques_idxs=np.array(ques_idxs),
              ques_char_idxs=np.array(ques_char_idxs),
+             ques_pos_tags=np.array(ques_pos_tags),
+             ques_ner_tags=np.array(ques_ner_tags),
+             ques_freq_tags=np.array(ques_freq_tags),
+             ques_em_tags=np.array(ques_em_tags),
+             ques_em_lem_tags=np.array(ques_em_lem_tags),
              y1s=np.array(y1s),
              y2s=np.array(y2s),
              ids=np.array(ids))
@@ -432,13 +485,13 @@ def pre_process(args):
                                    args.test_record_file, word2idx_dict, char2idx_dict, is_test=True)
         save(args.test_meta_file, test_meta, message="test meta")
 
-    save(args.word_emb_file, word_emb_mat, message="word embedding")
-    save(args.char_emb_file, char_emb_mat, message="char embedding")
-    save(args.train_eval_file, train_eval, message="train eval")
-    save(args.dev_eval_file, dev_eval, message="dev eval")
-    save(args.word2idx_file, word2idx_dict, message="word dictionary")
-    save(args.char2idx_file, char2idx_dict, message="char dictionary")
-    save(args.dev_meta_file, dev_meta, message="dev meta")
+    #save(args.word_emb_file, word_emb_mat, message="word embedding")
+    #save(args.char_emb_file, char_emb_mat, message="char embedding")
+    #save(args.train_eval_file, train_eval, message="train eval")
+    #save(args.dev_eval_file, dev_eval, message="dev eval")
+    #save(args.word2idx_file, word2idx_dict, message="word dictionary")
+    #save(args.char2idx_file, char2idx_dict, message="char dictionary")
+    #save(args.dev_meta_file, dev_meta, message="dev meta")
 
 
 if __name__ == '__main__':
