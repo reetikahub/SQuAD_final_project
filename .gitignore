@@ -1,6 +1,8 @@
 /data
 /save
 *.xml
-*.ipynb
-__pycache__
+DrQA.ipynb
+/.idea
+/.ipynb*
+/__pycache__
 x.py
