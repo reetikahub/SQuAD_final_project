@@ -41,7 +41,7 @@ class SQuAD(data.Dataset):
         data_path (str): Path to .npz file containing pre-processed dataset.
         use_v2 (bool): Whether to use SQuAD 2.0 questions. Otherwise only use SQuAD 1.1.
     """
-    def __init__(self, data_path, use_v2=True):
+    def __init__(self, data_path, pos_types, ner_types, use_v2=True):
         super(SQuAD, self).__init__()
 
         dataset = np.load(data_path)
@@ -49,6 +49,12 @@ class SQuAD(data.Dataset):
         #print("shape of context idxs:{}".format(self.context_idxs.shape))
         self.context_char_idxs = torch.from_numpy(dataset['context_char_idxs']).long()
         #print("shape of context char idxs:{}".format(self.context_char_idxs.shape))
+
+        self.context_pos_tags = torch.from_numpy(dataset['context_pos_tags']).long()
+        self.context_ner_tags = torch.from_numpy(dataset['context_ner_tags']).long()
+        self.context_freq_tags = torch.from_numpy(dataset['context_freq_tags']).double()
+        self.context_em_tags = torch.from_numpy(dataset['context_em_tags']).double()
+
         self.question_idxs = torch.from_numpy(dataset['ques_idxs']).long()
         self.question_char_idxs = torch.from_numpy(dataset['ques_char_idxs']).long()
         self.y1s = torch.from_numpy(dataset['y1s']).long()
@@ -60,6 +66,12 @@ class SQuAD(data.Dataset):
             ones = torch.ones((batch_size, 1), dtype=torch.int64)
             self.context_idxs = torch.cat((ones, self.context_idxs), dim=1)
             self.question_idxs = torch.cat((ones, self.question_idxs), dim=1)
+            self.context_pos_tags = torch.cat((ones*(pos_types-1), self.context_pos_tags), dim=1)
+            self.context_ner_tags = torch.cat((ones*(ner_types-1), self.context_ner_tags), dim=1)
+            self.context_em_tags = torch.cat((ones, self.context_em_tags), dim=1)
+
+            ones = torch.ones((batch_size, 1), dtype=torch.float64)
+            self.context_freq_tags = torch.cat((ones, self.context_freq_tags), dim=1)
 
             ones = torch.ones((batch_size, 1, w_len), dtype=torch.int64)
             self.context_char_idxs = torch.cat((ones, self.context_char_idxs), dim=1)
@@ -79,6 +91,10 @@ class SQuAD(data.Dataset):
         #print("context_idxs_shape:{}".format(self.context_idxs[idx].shape))
         example = (self.context_idxs[idx],
                    self.context_char_idxs[idx],
+                   self.context_pos_tags[idx],
+                   self.context_ner_tags[idx],
+                   self.context_freq_tags[idx],
+                   self.context_em_tags[idx],
                    self.question_idxs[idx],
                    self.question_char_idxs[idx],
                    self.y1s[idx],
@@ -111,7 +127,7 @@ def collate_fn(examples):
     def merge_0d(scalars, dtype=torch.int64):
         return torch.tensor(scalars, dtype=dtype)
 
-    def merge_1d(arrays, max_length, dtype=torch.int64, pad_value=0):
+    def merge_1d(arrays, dtype=torch.int64, pad_value=0):
         lengths = [(a != pad_value).sum() for a in arrays]
         padded = torch.zeros(len(arrays), max(lengths), dtype=dtype)
         for i, seq in enumerate(arrays):
@@ -119,7 +135,7 @@ def collate_fn(examples):
             padded[i, :end] = seq[:end]
         return padded
 
-    def merge_2d(matrices, max_height, dtype=torch.int64, pad_value=0):
+    def merge_2d(matrices, dtype=torch.int64, pad_value=0):
         heights = [(m.sum(1) != pad_value).sum() for m in matrices]
         widths = [(m.sum(0) != pad_value).sum() for m in matrices]
         padded = torch.zeros(len(matrices), max(heights), max(widths), dtype=dtype)
@@ -128,21 +144,39 @@ def collate_fn(examples):
             padded[i, :height, :width] = seq[:height, :width]
         return padded
 
+    def merge_1d_2x(array1, array2, dtype=torch.int64, pad_value=0):
+        lengths = [(a != pad_value).sum() for a in array1]
+        padded1 = torch.zeros(len(array1), max(lengths), dtype=dtype)
+        padded2 = torch.zeros(len(array2), max(lengths), dtype=torch.int64)
+        for i, seq in enumerate(array1):
+            end = lengths[i]
+            padded1[i, :end] = seq[:end]
+        for i, seq in enumerate(array2):
+            end = lengths[i]
+            padded2[i, :end] = seq[:end]
+        return padded1, padded2
+
     # Group by tensor type
     context_idxs, context_char_idxs, \
+        context_pos_tags, context_ner_tags, context_freq_tags, context_em_tags, \
         question_idxs, question_char_idxs, \
         y1s, y2s, ids = zip(*examples)
 
     # Merge into batch tensors
-    context_idxs = merge_1d(context_idxs, 400)
-    context_char_idxs = merge_2d(context_char_idxs, 400)
-    question_idxs = merge_1d(question_idxs, 50)
-    question_char_idxs = merge_2d(question_char_idxs, 50)
+    context_idxs = merge_1d(context_idxs)
+    context_char_idxs = merge_2d(context_char_idxs)
+    context_ner_tags = merge_1d(context_ner_tags, pad_value=-1)
+    context_freq_tags, context_pos_tags = merge_1d_2x(context_freq_tags, context_pos_tags, dtype=torch.float32)
+    context_em_tags = merge_1d(context_em_tags, pad_value=-1)
+
+    question_idxs = merge_1d(question_idxs)
+    question_char_idxs = merge_2d(question_char_idxs)
     y1s = merge_0d(y1s)
     y2s = merge_0d(y2s)
     ids = merge_0d(ids)
 
     return (context_idxs, context_char_idxs,
+            context_pos_tags, context_ner_tags, context_freq_tags, context_em_tags,
             question_idxs, question_char_idxs,
             y1s, y2s, ids)
 

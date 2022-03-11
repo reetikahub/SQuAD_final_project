@@ -99,11 +99,11 @@ def get_train_args():
                         help='Number of steps between successive evaluations.')
     parser.add_argument('--lr',
                         type=float,
-                        default=0.001,
+                        default=0.5,
                         help='Learning rate.')
     parser.add_argument('--l2_wd',
                         type=float,
-                        default=3e-7,
+                        default=0,
                         help='L2 weight decay.')
     parser.add_argument('--num_epochs',
                         type=int,
@@ -111,7 +111,7 @@ def get_train_args():
                         help='Number of epochs for which to train. Negative means forever.')
     parser.add_argument('--drop_prob',
                         type=float,
-                        default=0.1,
+                        default=0.2,
                         help='Probability of zeroing an activation in dropout layers.')
     parser.add_argument('--metric_name',
                         type=str,
@@ -178,13 +178,13 @@ def add_common_args(parser):
     """Add arguments common to all 3 scripts: setup.py, train.py, test.py"""
     parser.add_argument('--train_record_file',
                         type=str,
-                        default='./data/train.npz')
+                        default='./data/train2.npz')
     parser.add_argument('--dev_record_file',
                         type=str,
-                        default='./data/dev.npz')
+                        default='./data/dev2.npz')
     parser.add_argument('--test_record_file',
                         type=str,
-                        default='./data/test.npz')
+                        default='./data/test2.npz')
     parser.add_argument('--word_emb_file',
                         type=str,
                         default='./data/word_emb.json')
@@ -223,7 +223,7 @@ def add_train_test_args(parser):
                         help='Base directory for saving information.')
     parser.add_argument('--batch_size',
                         type=int,
-                        default=42,
+                        default=80,
                         help='Batch size per GPU. Scales automatically when \
                               multiple GPUs are available.')
     parser.add_argument('--use_squad_v2',
@@ -250,3 +250,23 @@ def add_train_test_args(parser):
                         type=float,
                         default=8,
                         help='Num of heads for QANet')
+    parser.add_argument('--pos_types',
+                        type=float,
+                        default=51,
+                        help='The dimension of hidden layers of QANet.')
+    parser.add_argument('--pos_dim',
+                        type=float,
+                        default=16,
+                        help='Num of heads for QANet')
+    parser.add_argument('--ner_types',
+                        type=float,
+                        default=27,
+                        help='The dimension of hidden layers of QANet.')
+    parser.add_argument('--ner_dim',
+                        type=float,
+                        default=8,
+                        help='Num of heads for QANet')
+    parser.add_argument('--model',
+                        type=str,
+                        default='qanet_extra',
+                        help='bidaf, qanet, qanet_extra')

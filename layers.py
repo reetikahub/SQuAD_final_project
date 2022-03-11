@@ -188,11 +188,61 @@ class CharWordEmbedding(nn.Module):
         emb = torch.cat([ch_emb, wd_emb], dim=2)  # (batch_size, seq_len, embed_size_word+channels)
         # emb = self.proj(emb)  # (batch_size, seq_len, embed_size_word+embed_size_char)
         # Modification
-        emb_c = self.conv1d(emb.transpose(1,
-                                          2))  # (batch_size, channels, len) because next is conv for which #ch should be 2nd argument
+        emb_c = self.conv1d(emb.transpose(1, 2))  # (batch_size, channels, len) conv for which #ch should be 2nd argument
         # print(emb_c.shape)
         emb_c = self.hwy(emb_c.transpose(1, 2))  # (batch_size, len, channels)
         return emb_c.transpose(1, 2)  # (batch_size, channels, len)
+
+
+class WordEmbeddingFeatures(nn.Module):
+    def __init__(self, d_word, d_pos, d_ner, channels, drop_prob=0.1, add_feat = True):
+        super().__init__()
+        self.drop_prob = drop_prob
+        if add_feat == True :
+            self.conv1d = Initialized_Conv1d(d_word + channels + d_pos + d_ner + 1, channels, bias=False)  # (d_char+d_word)
+        else:
+            self.conv1d = Initialized_Conv1d(d_word + channels, channels, bias=False)  # (d_char+d_word)
+        self.add_feat = add_feat
+        self.hwy = HighwayEncoder(2, channels)
+
+    def forward(self, wd_emb, ch_emb, Cp, Cn, c_freq, c_em):
+        # print(ch_emb.shape)
+        if self.add_feat == True :
+            #print("Cp shape:{}".format(Cp.shape))
+            wd_emb = torch.cat([wd_emb, Cp], dim=2)
+            #print("Cn shape:{}".format(Cn.shape))
+            wd_emb = torch.cat([wd_emb, Cn], dim=2)
+            #print("c_freq shape:{}".format(c_freq.shape))
+            wd_emb = torch.cat([wd_emb, c_freq.unsqueeze(-1)], dim=2)
+            #print("c_em shape:{}".format(c_em.shape))
+            wd_emb = torch.cat([wd_emb, c_em.unsqueeze(-1)], dim=2)
+        wd_emb = F.dropout(wd_emb, self.drop_prob, self.training)  # (batch_size, seq_len, embed_size)
+        #print(wd_emb.shape)
+        emb = torch.cat([ch_emb, wd_emb], dim=2)  # (batch_size, seq_len, embed_size_word+channels)
+        # emb = self.proj(emb)  # (batch_size, seq_len, embed_size_word+embed_size_char)
+        # Modification
+        emb_c = self.conv1d(emb.transpose(1, 2))  # (batch_size, channels, len) conv for which #ch should be 2nd argument
+        # print(emb_c.shape)
+        emb_c = self.hwy(emb_c.transpose(1, 2))  # (batch_size, len, channels)
+        return emb_c.transpose(1, 2)  # (batch_size, channels, len)
+
+class CharEmbedding(nn.Module):
+    def __init__(self, d_char, channels, drop_prob_char=0.05):
+        super().__init__()
+        self.drop_prob_char = drop_prob_char
+        self.conv2d = nn.Conv2d(d_char, channels, kernel_size=(1, 5), padding=(0, 2), bias=True)  # (d_char, d_char), earlier I did k=5
+        nn.init.kaiming_normal_(self.conv2d.weight, nonlinearity='relu')
+        # self.proj = nn.Linear(word_vectors.size(1)+d_char, hidden_size, bias=False)
+
+    def forward(self, ch_emb):
+        # print(ch_emb.shape)
+        ch_emb = ch_emb.permute(0, 3, 1, 2)  # (batch_size, embed_size, seq_len, words)
+        ch_emb = F.dropout(ch_emb, self.drop_prob_char, self.training)
+        ch_emb = self.conv2d(ch_emb)
+        ch_emb = F.relu(ch_emb)
+        ch_emb, _ = torch.max(ch_emb, dim=3)
+        ch_emb = ch_emb.transpose(1, 2)  # (batch_size, seq_len, embed_size)
+        return ch_emb  # (batch_size, channels, len)
 
 
 class Embedding(nn.Module):
