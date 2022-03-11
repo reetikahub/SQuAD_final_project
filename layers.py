@@ -8,12 +8,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-from util import masked_softmax
+from util import masked_softmax, get_available_devices
 import math
-
-
-def mask_logits(target, mask):
-    return target * (mask) + (1 - mask) * (-1e30)
+device, _ = get_available_devices()
 
 
 class Initialized_Conv1d(nn.Module):
@@ -49,7 +46,7 @@ def PosEncoder(x):
     # print(position)
     signal = torch.cat([torch.sin(position), torch.cos(position)], dim=0)  # (channels, length)
     signal = signal.view(1, channels, length)
-    return x + signal.cuda()  # (batch_size, channels, length)
+    return x + signal.to(device)  # (batch_size, channels, length)
 
 
 class DepthwiseSeparableConv(nn.Module):
@@ -427,6 +424,8 @@ class QANetAttention(nn.Module):
 
         return s
 
+def mask_logits(target, mask):
+    return target * (mask) + (1 - mask) * (-1e30)
 
 class BiDAFAttention(nn.Module):
     """Bidirectional attention originally used by BiDAF.
