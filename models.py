@@ -164,7 +164,7 @@ class QANet_extra(nn.Module):
         #print(word_vec.shape[1])
         #print(char_vec.shape[1])
         self.ch_emb = CharEmbedding(d_char=char_vec.shape[1], channels=d_model, drop_prob_char=0.05)
-        self.q_word_emb = WordEmbeddingFeatures(d_word=word_vec.shape[1], d_pos=pos_dim, d_ner=ner_dim, channels=d_model, drop_prob = 0.1, add_feat = False)
+        #self.q_word_emb = WordEmbeddingFeatures(d_word=word_vec.shape[1], d_pos=pos_dim, d_ner=ner_dim, channels=d_model, drop_prob = 0.1, add_feat = True)
         self.c_word_emb = WordEmbeddingFeatures(d_word=word_vec.shape[1], d_pos=pos_dim, d_ner=ner_dim, channels=d_model, drop_prob = 0.1, add_feat = True)
 
         self.num_head = num_head
@@ -189,8 +189,11 @@ class QANet_extra(nn.Module):
         
         Cc = self.ch_emb(Cc)
         C = self.c_word_emb(Cw, Cc, Cp, Cn, c_freq, c_em)
+        Cp_dummy = torch.zeros(b, len, 16)
+        Cn_dummy = torch.zeros(b, len, 8)
+        Cf_dummy = torch.zeros(b, len)
         Qc = self.ch_emb(Qc)
-        Q = self.q_word_emb(Qw, Qc, None, None, None, None) #Switch it around if using old function
+        Q = self.c_word_emb(Qw, Qc, Cp_dummy, Cn_dummy, Cf_dummy, Cf_dummy) #Switch it around if using old function
         
         Ce = self.emb_enc(C, maskC, 1, 1) # (batch_size, seq_len, hidden_size)
         Qe = self.emb_enc(Q, maskQ, 1, 1) # (batch_size, seq_len, hidden_size)

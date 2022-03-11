@@ -97,10 +97,15 @@ def main(args):
     #lr = args.lr
     #m = 1 / math.log2(1e3)
     #scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ee: m * math.log2(ee + 1) if ee < 1e3 else 1)
-                    
-    optimizer = optim.Adadelta(model.parameters(), args.lr,
-                               weight_decay=args.l2_wd)
-    scheduler = sched.LambdaLR(optimizer, lambda s: 1.)  # Constant LR
+
+    if args.model == 'bidaf':
+        optimizer = optim.Adadelta(model.parameters(), args.lr, weight_decay=args.l2_wd)
+        scheduler = sched.LambdaLR(optimizer, lambda s: 1.)  # Constant LR
+    else:
+        parameters = filter(lambda param: param.requires_grad, model.parameters())
+        optimizer = optim.Adam(lr=args.lr, betas=(0.8, 0.999), eps=1e-7, weight_decay=args.l2_wd, params=parameters)
+        m = 1 / math.log2(1e3)
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ee: m * math.log2(ee + 1) if ee < 1e3 else 1)
 
     # Get data loader
     log.info('Building dataset...')
@@ -187,7 +192,8 @@ def main(args):
                     results, pred_dict = evaluate(model, dev_loader, device,
                                                   args.dev_eval_file,
                                                   args.max_ans_len,
-                                                  args.use_squad_v2)
+                                                  args.use_squad_v2,
+                                                  args.model)
                     saver.save(step, model, results[args.metric_name], device)
                     ema.resume(model)
 
@@ -207,7 +213,7 @@ def main(args):
                                    num_visuals=args.num_visuals)
 
 
-def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2):
+def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2, model_type):
     nll_meter = util.AverageMeter()
 
     model.eval()
@@ -233,7 +239,7 @@ def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2):
 
             # Forward
             # Added by Reetika - character level context and question in model
-            if args.model == 'qanet':
+            if model_type == 'qanet':
                 log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs)
             else:
                 log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs, c_pos, c_ner, c_freq, c_em)
