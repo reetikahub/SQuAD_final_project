@@ -212,7 +212,7 @@ class WordEmbeddingFeatures(nn.Module):
             #print("c_freq shape:{}".format(c_freq.shape))
             wd_emb = torch.cat([wd_emb, c_freq.unsqueeze(-1)], dim=2)
             #print("c_em shape:{}".format(c_em.shape))
-            wd_emb = torch.cat([wd_emb, c_em.unsqueeze(-1)], dim=2)
+            #wd_emb = torch.cat([wd_emb, c_em.unsqueeze(-1)], dim=2)
         wd_emb = F.dropout(wd_emb, self.drop_prob, self.training)  # (batch_size, seq_len, embed_size)
         #print(wd_emb.shape)
         emb = torch.cat([ch_emb, wd_emb], dim=2)  # (batch_size, seq_len, embed_size_word+channels)
@@ -373,6 +373,13 @@ class QANetAttention(nn.Module):
         for weight in (self.c_weight, self.q_weight, self.cq_weight):
             nn.init.xavier_uniform_(weight)
         self.bias = nn.Parameter(torch.zeros(1))
+        self.attention_map = None
+
+    def save_attention_map(self, attention_map):
+        self.attention_map = attention_map
+
+    def get_attention_map(self):
+        return self.attention_map
 
     def forward(self, c, q, c_mask, q_mask):
         c = c.transpose(1, 2)
@@ -390,6 +397,8 @@ class QANetAttention(nn.Module):
         q_mask = q_mask.view(batch_size, 1, q_len)  # (batch_size, 1, q_len)
         s1 = masked_softmax(s, q_mask, dim=2)  # (batch_size, c_len, q_len)
         s2 = masked_softmax(s, c_mask, dim=1)  # (batch_size, c_len, q_len)
+
+        self.save_attention_map(s2)
 
         # (bs, c_len, q_len) x (bs, q_len, hid_size) => (bs, c_len, hid_size)
         a = torch.bmm(s1, q)
