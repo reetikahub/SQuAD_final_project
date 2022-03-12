@@ -27,7 +27,7 @@ from tensorboardX import SummaryWriter
 from tqdm import tqdm
 from ujson import load as json_load
 from util import collate_fn, SQuAD
-
+#from plot_attention_heatmap import plot_attention
 
 def main(args):
     # Set up logging
@@ -114,12 +114,7 @@ def main(args):
             y1, y2 = y1.to(device), y2.to(device)
             loss = F.nll_loss(log_p1, y1) + F.nll_loss(log_p2, y2)
             nll_meter.update(loss.item(), batch_size)
-
-            blocks = model.blocks
-            for blk in blocks:
-                att = blk.get_attention_map()
-                print(att)
-
+            print(qw_idxs)
             # Get F1 and EM scores
             p1, p2 = log_p1.exp(), log_p2.exp()
             #print(p1,p2)
@@ -136,15 +131,18 @@ def main(args):
                                                       starts.tolist(),
                                                       ends.tolist(),
                                                       args.use_squad_v2)
+
+            #att = model.module.cq_att.get_attention_map()
+
             #print(idx2pred, uuid2pred)
             pred_dict.update(idx2pred)
             sub_dict.update(uuid2pred)
-            dict = {}
-            for qid in ids.tolist():
-                uuid = gold_dict[str(qid)]["uuid"]
-                dict[uuid+'_p1'] = p1
-                dict[uuid+'_p2'] = p2
-            pred_dict.update(dict)
+            #dict = {}
+            #for qid in ids.tolist():
+            #    uuid = gold_dict[str(qid)]["uuid"]
+            #    dict[uuid] = p1
+            #    dict[uuid] = p2
+            # pred_dict.update(dict)
 
     # Log results (except for test set, since it does not come with labels)
     if args.split != 'test':
@@ -155,6 +153,16 @@ def main(args):
         if args.use_squad_v2:
             results_list.append(('AvNA', results['AvNA']))
         results = OrderedDict(results_list)
+
+        #att = att.transpose(1, 2)
+        #file_name_const = join(args.save_dir, args.split)
+        #for i, qid in enumerate(ids.tolist()):
+        #    file_name = file_name_const + str(qid) + 'attention.png'
+        #    print(cw_idxs[i])
+        #    print(qw_idxs[i])
+        #    plot_attention(att[i].squeeze(), file_name, cw_idxs[i].squeeze(), qw_idxs[i].squeeze())
+
+        #print_att_heatmap(gold_dict, ids.tolist(), file_name, att.transpose(1, 2))
 
         # Log to console
         results_str = ', '.join(f'{k}: {v:05.2f}' for k, v in results.items())
