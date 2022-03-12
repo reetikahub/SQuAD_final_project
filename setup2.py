@@ -373,7 +373,7 @@ def build_features(args, examples, data_type, out_file, word2idx_dict, char2idx_
         context_em_tags.append(context_em_tag)
         for i, token in enumerate(example["context_feature"]["em_lem"]):
             context_em_lem_tag[i] = token
-        context_em_tags.append(context_em_lem_tag)
+        context_em_lem_tags.append(context_em_lem_tag)
 
         #NTF tags
         for i, token in enumerate(example["context_feature"]["ntf"]):
@@ -396,7 +396,7 @@ def build_features(args, examples, data_type, out_file, word2idx_dict, char2idx_
         ques_em_tags.append(ques_em_tag)
         for i, token in enumerate(example["context_feature"]["em_lem_q"]):
             ques_em_lem_tag[i] = token
-        ques_em_tags.append(ques_em_lem_tag)
+        ques_em_lem_tags.append(ques_em_lem_tag)
 
         #NTF tags
         for i, token in enumerate(example["context_feature"]["ntf_q"]):

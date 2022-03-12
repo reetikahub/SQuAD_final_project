@@ -189,11 +189,12 @@ class QANet_extra(nn.Module):
         
         Cc = self.ch_emb(Cc)
         C = self.c_word_emb(Cw, Cc, Cp, Cn, c_freq, c_em)
+        Qc = self.ch_emb(Qc)
+        b, len, _ = Qc.shape
         Cp_dummy = torch.zeros(b, len, 16)
         Cn_dummy = torch.zeros(b, len, 8)
         Cf_dummy = torch.zeros(b, len)
-        Qc = self.ch_emb(Qc)
-        Q = self.c_word_emb(Qw, Qc, Cp_dummy, Cn_dummy, Cf_dummy, Cf_dummy) #Switch it around if using old function
+        Q = self.c_word_emb(Qw, Qc, Cp_dummy.cuda(), Cn_dummy.cuda(), Cf_dummy.cuda(), Cf_dummy.cuda()) #Switch it around if using old function
         
         Ce = self.emb_enc(C, maskC, 1, 1) # (batch_size, seq_len, hidden_size)
         Qe = self.emb_enc(Q, maskQ, 1, 1) # (batch_size, seq_len, hidden_size)

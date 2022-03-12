@@ -53,7 +53,7 @@ class SQuAD(data.Dataset):
         self.context_pos_tags = torch.from_numpy(dataset['context_pos_tags']).long()
         self.context_ner_tags = torch.from_numpy(dataset['context_ner_tags']).long()
         self.context_freq_tags = torch.from_numpy(dataset['context_freq_tags']).double()
-        self.context_em_tags = torch.from_numpy(dataset['context_em_tags']).double()
+        self.context_em_tags = torch.from_numpy(dataset['context_em_tags']).long()
 
         self.question_idxs = torch.from_numpy(dataset['ques_idxs']).long()
         self.question_char_idxs = torch.from_numpy(dataset['ques_char_idxs']).long()
@@ -68,10 +68,11 @@ class SQuAD(data.Dataset):
             self.question_idxs = torch.cat((ones, self.question_idxs), dim=1)
             self.context_pos_tags = torch.cat((ones*(pos_types-1), self.context_pos_tags), dim=1)
             self.context_ner_tags = torch.cat((ones*(ner_types-1), self.context_ner_tags), dim=1)
-            self.context_em_tags = torch.cat((ones, self.context_em_tags), dim=1)
 
             ones = torch.ones((batch_size, 1), dtype=torch.float64)
             self.context_freq_tags = torch.cat((ones, self.context_freq_tags), dim=1)
+            zeros = torch.zeros((batch_size, 1), dtype=torch.float64)
+            self.context_em_tags = torch.cat((zeros, self.context_em_tags), dim=1)
 
             ones = torch.ones((batch_size, 1, w_len), dtype=torch.int64)
             self.context_char_idxs = torch.cat((ones, self.context_char_idxs), dim=1)
@@ -166,7 +167,7 @@ def collate_fn(examples):
     context_idxs = merge_1d(context_idxs)
     context_char_idxs = merge_2d(context_char_idxs)
     context_ner_tags = merge_1d(context_ner_tags, pad_value=-1)
-    context_freq_tags, context_pos_tags = merge_1d_2x(context_freq_tags, context_pos_tags, dtype=torch.float32)
+    context_freq_tags, context_pos_tags = merge_1d_2x(context_freq_tags, context_pos_tags, torch.float32)
     context_em_tags = merge_1d(context_em_tags, pad_value=-1)
 
     question_idxs = merge_1d(question_idxs)

@@ -397,7 +397,6 @@ class QANetAttention(nn.Module):
         q_mask = q_mask.view(batch_size, 1, q_len)  # (batch_size, 1, q_len)
         s1 = masked_softmax(s, q_mask, dim=2)  # (batch_size, c_len, q_len)
         s2 = masked_softmax(s, c_mask, dim=1)  # (batch_size, c_len, q_len)
-
         self.save_attention_map(s2)
 
         # (bs, c_len, q_len) x (bs, q_len, hid_size) => (bs, c_len, hid_size)
