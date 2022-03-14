@@ -18,7 +18,7 @@ import math
 from args import get_train_args
 from collections import OrderedDict
 from json import dumps
-from models import BiDAF, QANet
+from models import BiDAF, QANet, QANet_extra
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 from ujson import load as json_load
@@ -50,22 +50,30 @@ def main(args):
     log.info('Building model...')
     # Added by Reetika - char_vectors here and hard-coded drop_prob_char - can be added to arguments later,
     # # Also added len_c and len_q arguments
-    # model = BiDAF(word_vectors=word_vectors,
-    #              char_vectors=char_vectors,
-    #              hidden_size=args.hidden_size,
-    #              drop_prob=args.drop_prob,
-    #              drop_prob_char=0.05)
-    # model = QANet(word_vectors=word_vectors,
-    #               char_vectors=char_vectors,
-    #               hidden_size=args.hidden_size,
-    #               drop_prob=args.drop_prob,
-    #               drop_prob_char=0.05)
-    model = QANet(
-        word_vec=word_vectors,
-        char_vec=char_vectors,
-        d_model=args.d_model,
-        drop_prob=args.drop_prob,
-        num_head=args.num_head)
+
+    if args.model == 'bidaf':
+        model = BiDAF(word_vectors=word_vectors,
+                    char_vectors=char_vectors,
+                    hidden_size=args.hidden_size,
+                    drop_prob=args.drop_prob,
+                    pos_size=args.pos_types,
+                    pos_dim=args.pos_dim,
+                    ner_size=args.ner_types,
+                    ner_dim=args.ner_dim)
+    elif args.model == 'qanet':
+        model = QANet(word_vec=word_vectors,
+                        char_vec=char_vectors,
+                        d_model=args.d_model,
+                        drop_prob=args.drop_prob,
+                        num_head=args.num_head)
+    else:
+        model = QANet_extra(word_vec=word_vectors,
+                        char_vec=char_vectors,
+                        d_model=args.d_model,
+                        drop_prob=args.drop_prob,
+                        num_head=args.num_head,
+                        pos_size=args.pos_types, pos_dim=args.pos_dim, ner_size=args.ner_types, ner_dim=args.ner_dim)
+
     model = nn.DataParallel(model, args.gpu_ids)
     if args.load_path:
         log.info(f'Loading checkpoint from {args.load_path}...')
@@ -84,25 +92,30 @@ def main(args):
                                  log=log)
 
     # Get optimizer and scheduler
-    parameters = filter(lambda param: param.requires_grad, model.parameters())
-    optimizer = optim.Adam(lr=args.lr, betas=(0.9, 0.999), eps=1e-7, weight_decay=args.l2_wd, params=model.parameters())
-    lr = args.lr
-    m = 1 / math.log2(1e3)
-    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ee: m * math.log2(ee + 1) if ee < 1e3 else 1)
-                    
-    #optimizer = optim.Adadelta(model.parameters(), args.lr,
-    #                           weight_decay=args.l2_wd)
-    #scheduler = sched.LambdaLR(optimizer, lambda s: 1.)  # Constant LR
+    #parameters = filter(lambda param: param.requires_grad, model.parameters())
+    #optimizer = optim.Adam(lr=args.lr, betas=(0.8, 0.999), eps=1e-7, weight_decay=args.l2_wd, params=model.parameters())
+    #lr = args.lr
+    #m = 1 / math.log2(1e3)
+    #scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ee: m * math.log2(ee + 1) if ee < 1e3 else 1)
+
+    if args.model == 'bidaf':
+        optimizer = optim.Adadelta(model.parameters(), args.lr, weight_decay=args.l2_wd)
+        scheduler = sched.LambdaLR(optimizer, lambda s: 1.)  # Constant LR
+    else:
+        parameters = filter(lambda param: param.requires_grad, model.parameters())
+        optimizer = optim.Adam(lr=args.lr, betas=(0.8, 0.999), eps=1e-7, weight_decay=args.l2_wd, params=parameters)
+        m = 1 / math.log2(1e3)
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ee: m * math.log2(ee + 1) if ee < 1e3 else 1)
 
     # Get data loader
     log.info('Building dataset...')
-    train_dataset = SQuAD(args.train_record_file, args.use_squad_v2)
+    train_dataset = SQuAD(args.train_record_file, args.pos_types, args.ner_types, args.use_squad_v2)
     train_loader = data.DataLoader(train_dataset,
                                    batch_size=args.batch_size,
                                    shuffle=True,
                                    num_workers=args.num_workers,
                                    collate_fn=collate_fn)
-    dev_dataset = SQuAD(args.dev_record_file, args.use_squad_v2)
+    dev_dataset = SQuAD(args.dev_record_file,  args.pos_types, args.ner_types, args.use_squad_v2)
     dev_loader = data.DataLoader(dev_dataset,
                                  batch_size=args.batch_size,
                                  shuffle=False,
@@ -118,11 +131,14 @@ def main(args):
         log.info(f'Starting epoch {epoch}...')
         with torch.enable_grad(), \
                 tqdm(total=len(train_loader.dataset)) as progress_bar:
-            for cw_idxs, cc_idxs, qw_idxs, qc_idxs, y1, y2, ids in train_loader:
+            for cw_idxs, cc_idxs, c_pos, c_ner, c_freq, c_em, qw_idxs, qc_idxs, y1, y2, ids in train_loader:
                 # Setup for forward
                 cw_idxs = cw_idxs.to(device)
                 qw_idxs = qw_idxs.to(device)
-
+                c_pos = c_pos.to(device)
+                c_ner = c_ner.to(device)
+                c_freq = c_freq.to(device)
+                c_em = c_em.to(device)
                 # Added by Reetika
                 cc_idxs = cc_idxs.to(device)
                 qc_idxs = qc_idxs.to(device)
@@ -132,7 +148,10 @@ def main(args):
 
                 # Forward
                 # Added by Reetika - character level context and question in model
-                log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs)
+                if args.model == 'qanet':
+                    log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs)
+                else:
+                    log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs, c_pos, c_ner, c_freq, c_em)    
                 # print("max of log p1:{}{}{}".format(log_p1[0,57], log_p1[1,45], log_p1[2,113]))
                 # print("max of log p2:{}{}{}".format(log_p2[0,60], log_p2[1,47], log_p2[2,113]))
                 y1, y2 = y1.to(device), y2.to(device)
@@ -173,7 +192,8 @@ def main(args):
                     results, pred_dict = evaluate(model, dev_loader, device,
                                                   args.dev_eval_file,
                                                   args.max_ans_len,
-                                                  args.use_squad_v2)
+                                                  args.use_squad_v2,
+                                                  args.model)
                     saver.save(step, model, results[args.metric_name], device)
                     ema.resume(model)
 
@@ -193,7 +213,7 @@ def main(args):
                                    num_visuals=args.num_visuals)
 
 
-def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2):
+def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2, model_type):
     nll_meter = util.AverageMeter()
 
     model.eval()
@@ -202,11 +222,15 @@ def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2):
         gold_dict = json_load(fh)
     with torch.no_grad(), \
             tqdm(total=len(data_loader.dataset)) as progress_bar:
-        for cw_idxs, cc_idxs, qw_idxs, qc_idxs, y1, y2, ids in data_loader:
+        for cw_idxs, cc_idxs, c_pos, c_ner, c_freq, c_em, qw_idxs, qc_idxs, y1, y2, ids in data_loader:
             # Setup for forward
 
             cw_idxs = cw_idxs.to(device)
             qw_idxs = qw_idxs.to(device)
+            c_pos = c_pos.to(device)
+            c_ner = c_ner.to(device)
+            c_freq = c_freq.to(device)
+            c_em = c_em.to(device)
             # Added by Reetika
             cc_idxs = cc_idxs.to(device)
             qc_idxs = qc_idxs.to(device)
@@ -215,7 +239,10 @@ def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2):
 
             # Forward
             # Added by Reetika - character level context and question in model
-            log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs)
+            if model_type == 'qanet':
+                log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs)
+            else:
+                log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs, c_pos, c_ner, c_freq, c_em)
             y1, y2 = y1.to(device), y2.to(device)
             loss = F.nll_loss(log_p1, y1) + F.nll_loss(log_p2, y2)
             nll_meter.update(loss.item(), batch_size)
