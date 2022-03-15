@@ -228,6 +228,7 @@ class CharEmbedding(nn.Module):
         super().__init__()
         self.drop_prob_char = drop_prob_char
         self.conv2d = nn.Conv2d(d_char, channels, kernel_size=(1, 5), padding=(0, 2), bias=True)  # (d_char, d_char), earlier I did k=5
+        #self.conv1d = nn.Conv1d(channels, channels, kernel_size=3, padding=1, bias=True)  # (d_char, d_char), earlier I did k=5
         nn.init.kaiming_normal_(self.conv2d.weight, nonlinearity='relu')
         # self.proj = nn.Linear(word_vectors.size(1)+d_char, hidden_size, bias=False)
 
@@ -238,6 +239,9 @@ class CharEmbedding(nn.Module):
         ch_emb = self.conv2d(ch_emb)
         ch_emb = F.relu(ch_emb)
         ch_emb, _ = torch.max(ch_emb, dim=3)
+        #ch_emb2 = self.conv1d(ch_emb)
+        #ch_emb2 = F.relu(ch_emb2)
+        #ch_emb2, _ = torch.max(ch_emb2, dim=3)
         ch_emb = ch_emb.transpose(1, 2)  # (batch_size, seq_len, embed_size)
         return ch_emb  # (batch_size, channels, len)
 
@@ -397,7 +401,7 @@ class QANetAttention(nn.Module):
         q_mask = q_mask.view(batch_size, 1, q_len)  # (batch_size, 1, q_len)
         s1 = masked_softmax(s, q_mask, dim=2)  # (batch_size, c_len, q_len)
         s2 = masked_softmax(s, c_mask, dim=1)  # (batch_size, c_len, q_len)
-        self.save_attention_map(s2)
+        self.save_attention_map(s)
 
         # (bs, c_len, q_len) x (bs, q_len, hid_size) => (bs, c_len, hid_size)
         a = torch.bmm(s1, q)
@@ -574,30 +578,93 @@ class QANetOutput(nn.Module):
         super().__init__()
         self.w1 = Initialized_Conv1d(d_model * 2, 1)
         self.w2 = Initialized_Conv1d(d_model * 2, 1)
-        #self.w3 = Initialized_Conv1d(d_model * 2, d_model)
-        #self.w4 = Initialized_Conv1d(d_model * 2, 1)
 
     def forward(self, M1, M2, M3, mask):
         X1 = torch.cat([M1, M2], dim=1)
         X2 = torch.cat([M1, M3], dim=1)
         y1 = self.w1(X1)
-#        y2 = self.w2(X2)
+        log_p1 = masked_softmax(y1.squeeze(), mask, log_softmax=True)
+        y2 = self.w2(X2) #project to d-dimensional space
+        log_p2 = masked_softmax(y2.squeeze(), mask, log_softmax=True)
+        return log_p1, log_p2
+
+class QANetOutput2(nn.Module):
+    """Output layer used by BiDAF for question answering.
+
+    Computes a linear transformation of the attention and modeling
+    outputs, then takes the softmax of the result to get the start pointer.
+    A bidirectional LSTM is then applied the modeling output to produce `mod_2`.
+    A second linear+softmax of the attention output and `mod_2` is used
+    to get the end pointer.
+
+    Args:
+        hidden_size (int): Hidden size used in the BiDAF model.
+        drop_prob (float): Probability of zero-ing out activations.
+    """
+
+    def __init__(self, d_model, c_len = 401):
+        super().__init__()
+        self.w1 = Initialized_Conv1d(d_model * 2, 1)
+        self.w2 = Initialized_Conv1d(d_model * 2, d_model)
+        self.w3 = Initialized_Conv1d(d_model * 2, d_model)
+        self.w4 = Initialized_Conv1d(d_model * 2, 1)
+
+    def forward(self, M1, M2, M3, mask):
+        X1 = torch.cat([M1, M2], dim=1)
+        X2 = torch.cat([M1, M3], dim=1)
+        y1 = self.w1(X1)
+        y2 = self.w2(X2)
 #        st_end = F.relu(torch.cat((y1.squeeze(), y2.squeeze()), dim=1))
 #        y3 = self.w3(st_end)
         # print(logits_1.squeeze()[1, 45:60])
         # print(logits_1.squeeze()[1, -10:-1])
         log_p1 = masked_softmax(y1.squeeze(), mask, log_softmax=True)
-#        p1 = masked_softmax(y1.squeeze(), mask, log_softmax=False)
-#        Ximp = p1.unsqueeze(dim=1) * X1
-#        A = self.w3(Ximp) #project to d-dimensional space
-        y2 = self.w2(X2) #project to d-dimensional space
-#        B = F.relu(y2)
-#        yall = torch.cat((A, B), dim=1)
-#        y2 = self.w4(yall)
+        p1 = masked_softmax(y1.squeeze(), mask, log_softmax=False)
+        Ximp = p1.unsqueeze(dim=1) * X1
+        A = self.w3(Ximp) #project to d-dimensional space
+        B = F.relu(y2)
+        yall = torch.cat((A, B), dim=1)
+        y2 = self.w4(yall)
         #print(y2.shape)
         log_p2 = masked_softmax(y2.squeeze(), mask, log_softmax=True)
         # print(log_p1[1, 45:60])
         # print(log_p2[1, -10:-1])
         return log_p1, log_p2
 
+class QANetOutput1(nn.Module):
+    """Output layer used by BiDAF for question answering.
 
+    Computes a linear transformation of the attention and modeling
+    outputs, then takes the softmax of the result to get the start pointer.
+    A bidirectional LSTM is then applied the modeling output to produce `mod_2`.
+    A second linear+softmax of the attention output and `mod_2` is used
+    to get the end pointer.
+
+    Args:
+        hidden_size (int): Hidden size used in the BiDAF model.
+        drop_prob (float): Probability of zero-ing out activations.
+    """
+
+    def __init__(self, d_model, c_len = 401):
+        super().__init__()
+        self.w1 = Initialized_Conv1d(d_model * 2, 1)
+        self.w2 = Initialized_Conv1d(d_model * 4, 1)
+
+    def forward(self, M1, M2, M3, mask):
+        X1 = torch.cat([M1, M2], dim=1)
+        X2 = torch.cat([M1, M3], dim=1)
+        y1 = self.w1(X1)
+#        st_end = F.relu(torch.cat((y1.squeeze(), y2.squeeze()), dim=1))
+#        y3 = self.w3(st_end)
+        # print(logits_1.squeeze()[1, 45:60])
+        # print(logits_1.squeeze()[1, -10:-1])
+        log_p1 = masked_softmax(y1.squeeze(), mask, log_softmax=True)
+        p1 = masked_softmax(y1.squeeze(), mask, log_softmax=False)
+        Ximp = p1.unsqueeze(dim=1) * X1
+        yall = torch.cat((Ximp, X2), dim=1)
+        y2 = self.w2(yall)
+        #print(y2.shape)
+        log_p2 = masked_softmax(y2.squeeze(), mask, log_softmax=True)
+        # print(log_p1[1, 45:60])
+        # print(log_p2[1, -10:-1])
+        return log_p1, log_p2

@@ -31,9 +31,9 @@ def plot_attention(data, file_name, cw_idxs, qw_idxs):
     Y_label = idx2word(gold_dict, qw_idxs.tolist())
     #print(len(X_label))
     #print(data.shape)
-    fig, ax = plt.subplots(figsize=(30, 12))  # set figure size
+    fig, ax = plt.subplots(figsize=(30, 4))  # set figure size
     #plt.imshow(data, cmap='hot', interpolation='nearest')
-    ax = sns.heatmap(data, cmap='hot')
+    ax = sns.heatmap(data, vmin=0.0, vmax=1.0, cmap='hot', cbar='False', xticklabels=X_label, yticklabels=Y_label)
     #ax.pcolor(data, cmap=plt.cm.Blues, alpha=0.9)
     # Set axis labels
     if X_label != None and Y_label != None:
@@ -41,17 +41,17 @@ def plot_attention(data, file_name, cw_idxs, qw_idxs):
         #Y_label = [y_label for y_label in Y_label]
 
         xticks = range(0, len(X_label))
-        ax.set_xticks(xticks, minor=False)  # major ticks
-        ax.set_xticklabels(X_label, minor=False, rotation=45)  # labels should be 'unicode'
+        #ax.set_xticks(xticks, minor=False)  # major ticks
+        #ax.set_xticklabels(X_label, minor=False, rotation=90)  # labels should be 'unicode'
 
         yticks = range(0, len(Y_label))
-        ax.set_yticks(yticks, minor=False)
-        ax.set_yticklabels(Y_label, minor=False)  # labels should be 'unicode'
+        #ax.set_yticks(yticks, minor=False)
+        #ax.set_yticklabels(Y_label, minor=False, rotation=90)  # labels should be 'unicode'
 
-        ax.grid(True)
+        #ax.grid(True)
 
     # Save Figure
     plt.title(u'Attention Heatmap')
     print("Saving figures %s" % file_name)
-    fig.savefig(file_name)  # save the figure to file
+    fig.savefig(file_name, bbox_inches='tight')  # save the figure to file
     plt.close(fig)  # close the figure

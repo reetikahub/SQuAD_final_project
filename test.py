@@ -21,7 +21,7 @@ import util
 from args import get_test_args
 from collections import OrderedDict
 from json import dumps
-from models import BiDAF, QANet, QANet_extra
+from models import BiDAF, BiDAF_extra, QANet, QANet_extra
 from os.path import join
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
@@ -43,8 +43,13 @@ def main(args):
     char_vectors = util.torch_from_json(args.char_emb_file)
     # Get model
     log.info('Building model...')
-    if args.model == 'bidaf':
+    if args.model == 'bidaf_extra':
         model = BiDAF(word_vectors=word_vectors,
+                    char_vectors=char_vectors,
+                    hidden_size=args.hidden_size,
+                    drop_prob=0)
+    elif args.model == 'bidaf':
+        model = BiDAF_extra(word_vectors=word_vectors,
                     char_vectors=char_vectors,
                     hidden_size=args.hidden_size,
                     drop_prob=0,

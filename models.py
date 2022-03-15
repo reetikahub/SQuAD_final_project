@@ -12,6 +12,67 @@ from layers import CharWordEmbedding, CharEmbedding, WordEmbeddingFeatures, Enco
 
 
 # Added char level modeling inside BiDAF
+class BiDAF_extra(nn.Module):
+    """Baseline BiDAF model for SQuAD.
+    Based on the paper:
+    "Bidirectional Attention Flow for Machine Comprehension"
+    by Minjoon Seo, Aniruddha Kembhavi, Ali Farhadi, Hannaneh Hajishirzi
+    (https://arxiv.org/abs/1611.01603).
+    Follows a high-level structure commonly found in SQuAD models:
+        - Embedding layer: Embed word indices to get word vectors.
+        - Encoder layer: Encode the embedded sequence.
+        - Attention layer: Apply an attention mechanism to the encoded sequence.
+        - Model encoder layer: Encode the sequence again.
+        - Output layer: Simple layer (e.g., fc + softmax) to get final outputs.
+    Args:
+        word_vectors (torch.Tensor): Pre-trained word vectors.
+        hidden_size (int): Number of features in the hidden state at each layer.
+        drop_prob (float): Dropout probability.
+    """
+
+    def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob=0.1, drop_prob_char=0.05):
+        super(BiDAF_extra, self).__init__()
+        self.emb = layers.Embedding(word_vectors=word_vectors,
+                                    hidden_size=hidden_size,
+                                    drop_prob=drop_prob)
+        self.char_emb = nn.Embedding.from_pretrained(char_vectors)
+        self.word_emb = nn.Embedding.from_pretrained(word_vectors)
+        self.wc_emb = layers.CharWordEmbedding(d_word=word_vectors.shape[1], d_char=char_vectors.shape[1], channels=hidden_size)
+
+        self.att = layers.BiDAFAttention(hidden_size=2 * hidden_size,
+                                         drop_prob=drop_prob)
+
+        self.mod = layers.RNNEncoder(input_size=8 * hidden_size,
+                                     hidden_size=hidden_size,
+                                     num_layers=2,
+                                     drop_prob=drop_prob)
+
+        self.out = layers.BiDAFOutput(hidden_size=hidden_size,
+                                      drop_prob=drop_prob)
+
+    def forward(self, cw_idxs, cc_idxs, qw_idxs, qc_idxs):
+        c_mask = torch.zeros_like(cw_idxs) != cw_idxs
+        q_mask = torch.zeros_like(qw_idxs) != qw_idxs
+        c_len, q_len = c_mask.sum(-1), q_mask.sum(-1)
+
+        Qw, Qc = self.word_emb(qw_idxs), self.char_emb(qc_idxs)
+        Cw, Cc = self.word_emb(cw_idxs), self.char_emb(cc_idxs)
+
+        c_emb = self.wc_emb(Cw, Cc)  # Create embeddings for context
+        q_emb = self.wc_emb(Qw, Qc)
+
+        c_enc = self.enc(c_emb, c_len)  # (batch_size, c_len, 2 * hidden_size)
+        q_enc = self.enc(q_emb, q_len)  # (batch_size, q_len, 2 * hidden_size)
+
+        att = self.att(c_enc, q_enc,
+                       c_mask, q_mask)  # (batch_size, c_len, 8 * hidden_size)
+
+        mod = self.mod(att, c_len)  # (batch_size, c_len, 2 * hidden_size)
+
+        out = self.out(att, mod, c_mask)  # 2 tensors, each (batch_size, c_len)
+
+        return out
+
 class BiDAF(nn.Module):
     """Baseline BiDAF model for SQuAD.
 
@@ -34,7 +95,7 @@ class BiDAF(nn.Module):
     """
 
     def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob=0.1, pos_size=51, pos_dim=16, ner_size=27, ner_dim=8):
-        super(BiDAF, self).__init__()
+        super().__init__()
         self.emb = layers.Embedding(word_vectors=word_vectors,
                                     hidden_size=hidden_size,
                                     drop_prob=drop_prob)

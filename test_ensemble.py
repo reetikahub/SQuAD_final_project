@@ -21,7 +21,7 @@ import util
 from args import get_test_args
 from collections import OrderedDict
 from json import dumps
-from models import BiDAF, QANet, QANet_extra
+from models import BiDAF, BiDAF_extra, QANet, QANet_extra
 from os.path import join
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
@@ -99,7 +99,9 @@ def main(args):
             qc_idxs = qc_idxs.to(device)
             batch_size = cw_idxs.size(0)
             
-            load_paths = ['save/train/qanet_tags_pad-02', 'save/train/qanet_128_200_8-07', 'save/train/qanet_128h_4h-04', 'save/train/qanet_new_lr2_80-01']
+            load_paths_bidaf = ['save/train/baseline-47', 'bidaf_char_zeropad-09']
+            load_paths = ['save/train/bidaf_char_zeropad-09','save/train/qanet_tags_pad-02',
+			'save/train/qanet_128_200_8-07', 'save/train/qanet_128h_4h-04', 'save/train/qanet_new_lr2_80-01']
             num_models = len(load_paths)
             #print(cw_idxs.shape)
             sz = cw_idxs.shape
@@ -127,8 +129,28 @@ def main(args):
                     num_head = 1
                     d_model = 96
                     char_emb_file = 'data/char_emb.json'
-
-                # Get embeddings
+                elif load_path == 'save/train/baseline-45':
+                    model_type = 'bidaf_extra'
+                    num_head = 8
+                    d_model = 128
+                    char_emb_file = 'data/char_emb.json'
+                elif load_path == 'save/train/baseline-47':
+                    model_type = 'bidaf_extra'
+                    num_head = 4
+                    d_model = 128
+                    char_emb_file = 'data/char_emb.json'
+                elif load_path == 'save/train/bidaf_char_zeropad-09':
+                    model_type = 'bidaf'
+                    num_head = 1
+                    d_model = 96
+                    char_emb_file = 'data/char_emb2.json'
+                else:
+                    model_type = 'qanet_extra'
+                    num_head = 8
+                    d_model = 128
+                    char_emb_file = 'data/char_emb2.json'
+                
+		# Get embeddings
                 #log.info('Loading embeddings...')
                 word_vectors = util.torch_from_json(args.word_emb_file)
                 char_vectors = util.torch_from_json(char_emb_file)
@@ -137,6 +159,8 @@ def main(args):
                 if model_type == 'bidaf':
                     model = BiDAF(word_vectors=word_vectors, char_vectors=char_vectors, hidden_size=args.hidden_size, drop_prob=0, pos_size=args.pos_types,
                         pos_dim=args.pos_dim, ner_size=args.ner_types, ner_dim=args.ner_dim)
+                elif model_type == 'bidaf_extra':
+                    model = BiDAF_extra(word_vectors=word_vectors, char_vectors=char_vectors, hidden_size=args.hidden_size, drop_prob=0)
                 elif model_type == 'qanet':
                     model = QANet(word_vec=word_vectors, char_vec=char_vectors, d_model=d_model, drop_prob=0, num_head=num_head)
                 else:
@@ -182,23 +206,21 @@ def main(args):
                                                       ends.tolist(),
                                                       args.use_squad_v2)
 
-            att = model.module.cq_att.get_attention_map()
-            att = att.transpose(1, 2)
-            file_name_const = join(args.save_dir, args.split)
-            for i, qid in enumerate(ids.tolist()):
-                file_name = file_name_const + str(qid) + 'attention.png'
-                #print(cw_idxs[i])
-                #print(qw_idxs[i])
-                plot_attention(att[i].squeeze().cpu(), file_name, cw_idxs[i].squeeze(), qw_idxs[i].squeeze())
+            #att = model.module.cq_att.get_attention_map()
+            #att = att.transpose(1, 2)
+            #file_name_const = join(args.save_dir, args.split)
+            #for i, qid in enumerate(ids.tolist()):
+            #    file_name = file_name_const + str(qid) + 'attention.png'
+            #    plot_attention(att[i].squeeze().cpu(), file_name, cw_idxs[i].squeeze(), qw_idxs[i].squeeze())
 
             #print(idx2pred, uuid2pred)
             pred_dict.update(idx2pred)
             sub_dict.update(uuid2pred)
-            dict = {}
-            for qid in ids.tolist():
-                uuid = gold_dict[str(qid)]["uuid"]
-                dict[uuid] = p1
-                dict[uuid] = p2
+            #dict = {}
+            #for qid in ids.tolist():
+            #    uuid = gold_dict[str(qid)]["uuid"]
+            #    dict[uuid] = p1
+            #    dict[uuid] = p2
             # pred_dict.update(dict)
 
     # Log results (except for test set, since it does not come with labels)
@@ -211,13 +233,11 @@ def main(args):
             results_list.append(('AvNA', results['AvNA']))
         results = OrderedDict(results_list)
 
-        att = att.transpose(1, 2)
+        #att = att.transpose(1, 2)
         file_name_const = join(args.save_dir, args.split)
         for i, qid in enumerate(ids.tolist()):
             file_name = file_name_const + str(qid) + 'attention.png'
-            #print(cw_idxs[i])
-            #print(qw_idxs[i])
-            plot_attention(att[i].squeeze().cpu(), file_name, cw_idxs[i].squeeze(), qw_idxs[i].squeeze())
+            #plot_attention(att[i].squeeze().cpu(), file_name, cw_idxs[i].squeeze(), qw_idxs[i].squeeze())
 
         #print_att_heatmap(gold_dict, ids.tolist(), file_name, att.transpose(1, 2))
 
